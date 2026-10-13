@@ -184,29 +184,6 @@ function drawLabel(x, y, text, color, dy = -18, size = 16) {
   ctx.restore();
 }
 
-function drawTrail(progressFn, t, color) {
-  const d = geo.dpr;
-  const steps = 26;
-  const span = 9; // race seconds of trail
-  ctx.save();
-  ctx.lineCap = "round";
-  for (let i = steps; i > 0; i--) {
-    const pa = progressFn(t - (span * i) / steps);
-    const pb = progressFn(t - (span * (i - 1)) / steps);
-    if (pa <= 0 || pb - pa <= 0) continue;
-    const [xa, ya] = pointAt(pa % 1), [xb, yb] = pointAt(pb % 1);
-    if (Math.hypot(xb - xa, yb - ya) > 80 * d) continue;
-    ctx.strokeStyle = color;
-    ctx.globalAlpha = (1 - i / steps) * 0.85;
-    ctx.lineWidth = 5 * d;
-    ctx.beginPath();
-    ctx.moveTo(xa, ya);
-    ctx.lineTo(xb, yb);
-    ctx.stroke();
-  }
-  ctx.restore();
-}
-
 const realPitLaps = race.pits[String(HAM)] || [];
 
 function render() {
@@ -240,10 +217,8 @@ function render() {
 
   // Ferrari's real Hamilton
   const realB = timeline(HAM);
-  const realFn = (tt) => realProgress(race, HAM, tt);
-  const rp = realFn(t);
+  const rp = realProgress(race, HAM, t);
   const [rx, ry] = pointAt(rp % 1);
-  drawTrail(realFn, t, "#e8112d");
   drawCar(rx, ry, 8, "#e8112d", { ring: "#ffffff" });
   const realLabel = state.running && pitting(realPitLaps, realB, t) ? "Ferrari (pit)" : "Ferrari";
 
