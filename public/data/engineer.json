@@ -1,0 +1,411 @@
+{
+  "note": "Built-in race engineer: radio and debrief lines for every situation the replay can produce. Slots in braces are filled from the race. Picked per strategy, so the same plan always hears the same lines.",
+  "radio": {
+    "start_copy": {
+      "from": "engineer",
+      "lines": [
+        "Lights out. Same plan as Ferrari. Let's see if it works twice.",
+        "Lights out. You're running Ferrari's exact strategy. Bold originality.",
+        "Race start. Identical plan to Ferrari's call, so no excuses either way.",
+        "Lights out, car 44. Ferrari's plan, your hands."
+      ]
+    },
+    "start_own": {
+      "from": "engineer",
+      "lines": [
+        "Lights out. Your strategy now, car 44. Ferrari's call is racing alongside.",
+        "Race start. We're off Ferrari's script from here.",
+        "Lights out. Sixty-two laps of Marina Bay. Let's make the plan count.",
+        "And we're racing. Ferrari's call is the ghost beside you. Beat it.",
+        "Lights out. Passing is hard here, so track position is everything."
+      ]
+    },
+    "start_softs": {
+      "from": "engineer",
+      "lines": [
+        "Lights out on softs. Ferrari started on mediums. Use the grip early.",
+        "Softs off the line. Make the first laps count before they fade.",
+        "Race start on softs. Good launch, now look after them."
+      ]
+    },
+    "box_next_lap": {
+      "from": "engineer",
+      "lines": [
+        "Box next lap, box next lap. {Tyres} are ready.",
+        "Plan stands. Box at the end of next lap for {tyres}.",
+        "We take the stop next lap. {Tyres} going on.",
+        "Box next time by. {Tyres}. Hit your marks on pit entry.",
+        "Next lap is the stop. {Tyres} waiting, crew is ready."
+      ]
+    },
+    "box_early": {
+      "from": "engineer",
+      "lines": [
+        "Box next lap. Early stop for {tyres}, then a long run.",
+        "We're stopping early. Box next lap for {tyres}. Expect traffic on exit.",
+        "Undercut attempt. Box next lap for {tyres}. Push the in-lap."
+      ]
+    },
+    "box_late": {
+      "from": "engineer",
+      "lines": [
+        "Box next lap for {tyres}. Fresh rubber for the run home.",
+        "Final stop next lap. {Tyres}, then it's a sprint to the flag.",
+        "Box next lap. {Tyres} for the last {laps} laps. Make them count."
+      ]
+    },
+    "box_vsc": {
+      "from": "engineer",
+      "lines": [
+        "VSC! Box, box, box. {Tyres}. Cheapest stop of the night.",
+        "Virtual safety car. Box this lap, box this lap. {Tyres} ready.",
+        "VSC deployed. Box now. About {loss}s in the pits instead of {green}.",
+        "Box, box, box under the VSC. {Tyres}. The field is crawling."
+      ]
+    },
+    "vsc_stay_out": {
+      "from": "engineer",
+      "lines": [
+        "VSC, VSC. Stay out, stay above the delta. We are checking.",
+        "Virtual safety car. Staying out, plan unchanged.",
+        "VSC deployed. We hold position. Keep the tyres warm.",
+        "VSC. We're not stopping. Watch the delta on the dash."
+      ]
+    },
+    "out_lap_traffic": {
+      "from": "engineer",
+      "lines": [
+        "You're out behind {car}. This could be sticky.",
+        "Rejoined behind {car}. Passing here is hard, so be patient.",
+        "Out of the pits, {car} just ahead. The tyre advantage is yours.",
+        "Clean stop. You've come out right behind {car}."
+      ]
+    },
+    "out_lap_clear": {
+      "from": "engineer",
+      "lines": [
+        "Clean stop. Out in free air, push now.",
+        "Good stop. Nobody close in front. Put the laps in.",
+        "Rejoined in clean air. This is where the stop pays off.",
+        "Free air ahead. Let's see what these tyres have."
+      ]
+    },
+    "out_lap_reply": {
+      "from": "driver",
+      "lines": [
+        "Tyres feel fresh. Let's go.",
+        "Copy. Grip is good.",
+        "Understood. Car feels alive on these."
+      ]
+    },
+    "stuck_driver": {
+      "from": "driver",
+      "lines": [
+        "Stuck behind {car}. I can't get close enough to pass.",
+        "I'm faster than {car} but I can't get by.",
+        "{car} is holding me up. Dirty air everywhere.",
+        "Can't follow {car} through the slow corners. Losing the front."
+      ]
+    },
+    "stuck_odds_low": {
+      "from": "engineer",
+      "lines": [
+        "Copy. Only about {pct}% a lap to get by here. Stay patient.",
+        "Understood. Odds of a pass here are about {pct}% a lap.",
+        "It's Marina Bay. {pct}% chance a lap. Keep it clean."
+      ]
+    },
+    "stuck_odds_high": {
+      "from": "engineer",
+      "lines": [
+        "Copy. You're quick enough. About {pct}% a lap, keep the pressure on.",
+        "Pace is there. Roughly {pct}% a lap, pick your moment.",
+        "Good pace. {pct}% a lap at this delta. Turn 7 is your chance."
+      ]
+    },
+    "stuck_long": {
+      "from": "engineer",
+      "lines": [
+        "{laps} laps behind {car} now. We are checking options.",
+        "Still behind {car}. This is costing us.",
+        "{car} is a mobile chicane. We know. We are checking."
+      ]
+    },
+    "stuck_long_pits_later": {
+      "from": "engineer",
+      "lines": [
+        "Hang in there. {car} still has a stop to make.",
+        "Patience. {car} hasn't pitted yet. The road will clear."
+      ]
+    },
+    "pass_made": {
+      "from": "engineer",
+      "lines": [
+        "Great move on {car}. Keep pushing.",
+        "That's {car} done. Nice move.",
+        "Past {car}. Lovely. Now build the gap.",
+        "Move made on {car}. That's the one we needed."
+      ]
+    },
+    "passed_by": {
+      "from": "engineer",
+      "lines": [
+        "{car} got by. Don't fight it, look after the tyres.",
+        "Lost a place to {car}. Stick to the plan.",
+        "{car} is through. We'll get it back on strategy."
+      ]
+    },
+    "cliff_soft": {
+      "from": "driver",
+      "lines": [
+        "These tyres are gone. Completely gone.",
+        "No rear grip left. The softs are finished.",
+        "Tyres are done. I'm sliding everywhere."
+      ]
+    },
+    "long_mediums": {
+      "from": "driver",
+      "lines": [
+        "These mediums have done a lot of laps. Grip is fading.",
+        "Mediums are getting tired. How long are we going?"
+      ]
+    },
+    "gap_ahead": {
+      "from": "engineer",
+      "lines": [
+        "Gap to Ferrari's call: {gap}s, and you're ahead.",
+        "You're {gap}s up on Ferrari's own strategy. Keep it there.",
+        "Ferrari's call is {gap}s behind you. Maranello is watching."
+      ]
+    },
+    "gap_behind": {
+      "from": "engineer",
+      "lines": [
+        "Gap to Ferrari's call: {gap}s behind. Still time.",
+        "Ferrari's own plan is {gap}s up the road.",
+        "You're {gap}s behind Ferrari's call. The tyre offset has to work."
+      ]
+    },
+    "gap_level": {
+      "from": "engineer",
+      "lines": [
+        "Exactly where Ferrari had us. Bold of you.",
+        "Dead level with Ferrari's call. Same plan, same place.",
+        "Gap to Ferrari's call: zero. Nobody can say you did worse."
+      ]
+    },
+    "t1_you": {
+      "from": "engineer",
+      "lines": [
+        "You left the track at Turn 1. Stewards have noted it.",
+        "Turn 1, track limits. It's noted. Stay on the island."
+      ]
+    },
+    "t1_cleared": {
+      "from": "engineer",
+      "lines": [
+        "No further action on Turn 1. Carry on.",
+        "Stewards are done with Turn 1. No penalty."
+      ]
+    },
+    "ferrari_off": {
+      "from": "engineer",
+      "lines": [
+        "Ferrari's car just went off at Turn 1. Stewards are looking.",
+        "The other 44 ran wide at Turn 1. Not you this time."
+      ]
+    },
+    "car_out": {
+      "from": "engineer",
+      "lines": [
+        "{car} has stopped. One less car to worry about.",
+        "{car} is out of the race. Keep it clean.",
+        "Retirement for {car}. That's a free place if we finish."
+      ]
+    },
+    "last_lap": {
+      "from": "engineer",
+      "lines": [
+        "Last lap. Bring it home.",
+        "Final lap. No heroics, just the flag.",
+        "One to go. Everything you've got."
+      ]
+    },
+    "flag_podium": {
+      "from": "engineer",
+      "lines": [
+        "Chequered flag. P{pos}! Podium in Singapore!",
+        "That's P{pos}, that's a podium! Ferrari owe you a call."
+      ]
+    },
+    "flag_better": {
+      "from": "engineer",
+      "lines": [
+        "Chequered flag. P{pos}. Ferrari's call managed P{realPos}.",
+        "P{pos} at the flag. Better than Ferrari's P{realPos}. Well judged.",
+        "Flag. P{pos}. That's a strategy win."
+      ]
+    },
+    "flag_same": {
+      "from": "engineer",
+      "lines": [
+        "Chequered flag. P{pos}. Same as Ferrari's call.",
+        "P{pos}. Ferrari's result, your way."
+      ]
+    },
+    "flag_copy": {
+      "from": "engineer",
+      "lines": [
+        "Chequered flag. P{pos}, exactly where Ferrari finished.",
+        "P{pos}. You are Ferrari now."
+      ]
+    },
+    "flag_worse": {
+      "from": "engineer",
+      "lines": [
+        "Chequered flag. P{pos}. Ferrari's call got P{realPos}. We'll review.",
+        "P{pos}. Not the night we planned. Debrief in five.",
+        "Flag. P{pos}. Ferrari managed P{realPos}. Let's not talk about it."
+      ]
+    },
+    "flag_dsq": {
+      "from": "engineer",
+      "lines": [
+        "Chequered flag. And... we have a problem with the stewards.",
+        "Flag. We only used one compound. The stewards want a word."
+      ]
+    }
+  },
+  "debrief": {
+    "headline": {
+      "podium": [
+        "Podium from the pit wall",
+        "Strategy put you on the podium",
+        "Singapore podium, made in strategy"
+      ],
+      "better": [
+        "You out-strategised Ferrari",
+        "Better call than Maranello",
+        "The pit wall should hire you"
+      ],
+      "copy": [
+        "You are Ferrari now",
+        "Identical plan, identical result",
+        "Copy, paste, P{pos}"
+      ],
+      "same_faster": [
+        "Same place, quicker race",
+        "Faster, but no prize for it"
+      ],
+      "same_slower": [
+        "Same result, different headache",
+        "Same place, slower route"
+      ],
+      "worse": [
+        "Somehow worse than Ferrari",
+        "Ferrari's plan wins this one",
+        "A strategy only you could love"
+      ],
+      "dsq": [
+        "Disqualified",
+        "Stewards 1, you 0",
+        "One compound, zero points"
+      ]
+    },
+    "result": {
+      "ahead": [
+        "You finished {gap}s ahead of Ferrari's real race: P{pos} to their P{realPos}.",
+        "Your plan beat Ferrari's real race by {gap}s, P{pos} against P{realPos}."
+      ],
+      "behind": [
+        "You finished {gap}s behind Ferrari's real race: P{pos} to their P{realPos}.",
+        "Ferrari's real race beat your plan by {gap}s, P{realPos} against your P{pos}."
+      ],
+      "copy": [
+        "You copied Ferrari's strategy to the lap, so you got Ferrari's result to the hundredth.",
+        "Same stops, same tyres, same laps: Ferrari's P{pos}, to the hundredth."
+      ],
+      "dsq": [
+        "Running one compound all race breaks the rules, so the result doesn't stand.",
+        "Every car must use two compounds in a dry race; yours used one."
+      ]
+    },
+    "reason": {
+      "vsc_stop": [
+        "Stopping under the VSC on lap {lap} saved about {saved}s against a normal stop.",
+        "The lap-{lap} VSC stop cost {saved}s less than a green-flag stop would have."
+      ],
+      "fresh_tyres": [
+        "Fresh softs from lap {lap} gave you the pace when it counted.",
+        "The late switch to softs on lap {lap} was worth it at the end."
+      ],
+      "traffic": [
+        "{loss}s of that was lost stuck behind {car} on laps {laps}.",
+        "The killer was {loss}s stuck behind {car} on laps {laps}."
+      ],
+      "extra_stop": [
+        "Each extra stop costs about {green}s in the pit lane, and the tyres never paid that back.",
+        "{stops} stops against Ferrari's {ferrariStops} meant {extra}s more in the pit lane."
+      ],
+      "cliff": [
+        "The tyres ran {laps} laps past their cliff and that cost about {loss}s.",
+        "Running the tyres {laps} laps past the cliff cost about {loss}s, more than a stop."
+      ],
+      "generic_ahead": [
+        "Your tyre offset against the cars around you made the difference.",
+        "Better tyres at the right moments made the difference."
+      ],
+      "generic_behind": [
+        "Time in the pit lane and the tyre offset never quite added up.",
+        "The stops landed you in the wrong place at the wrong time."
+      ],
+      "traffic_note": [
+        "It could have been more: {loss}s went behind {car} on laps {laps}.",
+        "And that's after losing {loss}s behind {car} on laps {laps}."
+      ],
+      "later_stop": [
+        "Staying out until lap {lap} gave you fresher tyres for the run to the flag.",
+        "Stopping on lap {lap}, later than Ferrari, left you the quicker car at the end."
+      ],
+      "soft_start": [
+        "Starting on softs bought you track position in the opening laps.",
+        "The soft-tyre start gained you places while the grip lasted."
+      ]
+    },
+    "luck": {
+      "lucky": [
+        "Tonight was kind: this plan usually finishes P{usual} ({usualPct}% of reruns).",
+        "The passing dice helped; P{usual} is the usual result ({usualPct}% of reruns)."
+      ],
+      "unlucky": [
+        "Unlucky tonight: this plan usually finishes P{usual} ({usualPct}% of reruns).",
+        "The dice weren't with you; P{usual} is the usual result ({usualPct}% of reruns)."
+      ]
+    },
+    "roast": {
+      "beat": [
+        "Maranello would like your number.",
+        "Somewhere in Maranello, a spreadsheet is being quietly deleted.",
+        "Ferrari's strategy group chat has gone very quiet."
+      ],
+      "copy": [
+        "Bold of you to do exactly what Ferrari did.",
+        "Originality is overrated, apparently.",
+        "Next time, try moving a pit stop. Any pit stop."
+      ],
+      "same": [
+        "All that thinking for the same result.",
+        "A different route to the same parking space."
+      ],
+      "worse": [
+        "Even the pit wall's group chat is laughing.",
+        "You've made Ferrari's plan look clever, which takes some doing.",
+        "Strategy is hard. Tonight it was very hard."
+      ],
+      "dsq": [
+        "One compound. One. The rulebook is not a suggestion.",
+        "The stewards thank you for an easy evening."
+      ]
+    }
+  }
+}

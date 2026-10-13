@@ -2,9 +2,15 @@ import {
   HAM, simulateGhost, realStrategy, validateStrategy, progressAt, classify, tyreAt, tyreModelLap,
   realProgress, ghostProgress, timeAtGhostLaps, raceOdds, pitLoss,
 } from "./sim.js";
+import { buildSummary, builtInRadio, builtInDebrief, stintSpans as spans } from "./engineer.js";
 
 const $ = (id) => document.getElementById(id);
-const race = await (await fetch("data/race.json")).json();
+const [race, BANK, CONFIG] = await Promise.all([
+  fetch("data/race.json").then((r) => r.json()),
+  fetch("data/engineer.json").then((r) => r.json()),
+  // Opus writes the radio only when the server is set up for it; otherwise the built-in lines play.
+  fetch("api/config").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
+]);
 const TOTAL = race.race.total_laps;
 const VSC = new Set(race.race.neutralised_laps);
 const driverByNum = Object.fromEntries(race.drivers.map((d) => [d.num, d]));
@@ -178,7 +184,7 @@ function drawLabel(x, y, text, color, dy = -18, size = 16) {
   ctx.restore();
 }
 
-function drawTrail(progressFn, t, color, dashed) {
+function drawTrail(progressFn, t, color) {
   const d = geo.dpr;
   const steps = 26;
   const span = 9; // race seconds of trail
@@ -190,10 +196,9 @@ function drawTrail(progressFn, t, color, dashed) {
     if (pa <= 0 || pb - pa <= 0) continue;
     const [xa, ya] = pointAt(pa % 1), [xb, yb] = pointAt(pb % 1);
     if (Math.hypot(xb - xa, yb - ya) > 80 * d) continue;
-    if (dashed && i % 2) continue;
     ctx.strokeStyle = color;
     ctx.globalAlpha = (1 - i / steps) * 0.85;
-    ctx.lineWidth = (dashed ? 4 : 5) * d;
+    ctx.lineWidth = 5 * d;
     ctx.beginPath();
     ctx.moveTo(xa, ya);
     ctx.lineTo(xb, yb);
@@ -238,15 +243,13 @@ function render() {
   const realFn = (tt) => realProgress(race, HAM, tt);
   const rp = realFn(t);
   const [rx, ry] = pointAt(rp % 1);
-  drawTrail(realFn, t, "#e8112d", false);
+  drawTrail(realFn, t, "#e8112d");
   drawCar(rx, ry, 8, "#e8112d", { ring: "#ffffff" });
   const realLabel = state.running && pitting(realPitLaps, realB, t) ? "Ferrari (pit)" : "Ferrari";
 
   // Your ghost Hamilton
   if (state.ghost) {
-    const ghostFn = (tt) => ghostProgress(race, state.ghost, tt);
     const [gx, gy] = pointAt(gp % 1);
-    drawTrail(ghostFn, t, "#d4e8ff", true);
     drawCar(gx, gy, 9, "rgba(212,232,255,0.92)", { glow: "rgba(212,232,255,0.95)" });
     const info = state.running && t < state.ghost.finish ? state.ghost.traffic[Math.floor(progressAt(state.ghost.bounds, t))] : null;
     const stuck = info?.held ? `You (stuck behind ${info.held}${info.chance ? `, ${Math.round(info.chance * 100)}% a lap to pass` : ""})` : null;
@@ -386,7 +389,7 @@ function shortEvent(text) {
 function renderRadio() {
   const shown = state.radio.filter((m) => m.shown).slice(-3);
   $("radio").innerHTML = shown.map((m) =>
-    `<li class="${m.from}"><span class="from">${m.from === "engineer" ? "Pit wall" : "Car 44"}, lap ${m.lap}</span>${escapeHtml(m.text)}</li>`,
+    `<li class="${m.from}"><span class="from">${m.from === "engineer" ? "Pit wall" : "Car 44"}, ${m.lap > TOTAL ? "flag" : `lap ${m.lap}`}</span>${escapeHtml(m.text)}</li>`,
   ).join("");
 }
 
@@ -400,12 +403,7 @@ const tl = $("timeline");
 const pct = (lap) => `${((lap - 1) / TOTAL) * 100}%`;
 const compoundName = (c) => (c === "SOFT" ? "Soft" : "Medium");
 
-function stintSpans(stints) {
-  return stints.map((s, i) => {
-    const end = i + 1 < stints.length ? stints[i + 1].from - 1 : TOTAL;
-    return { ...s, i, end, laps: end - s.from + 1 };
-  });
-}
+const stintSpans = (stints) => spans(stints, TOTAL);
 
 function renderRuler() {
   const st = state.stints;
@@ -672,138 +670,7 @@ $("load-real").addEventListener("click", () => {
   renderRuler();
 });
 
-// ---------------------------------------------------------------- race summary for the engineer
-function orderAt(t, excludeNum, extra) {
-  const ps = [];
-  for (const d of race.drivers) {
-    if (d.num === excludeNum) continue;
-    const b = timeline(d.num);
-    if (b.length) ps.push({ code: d.code, p: progressAt(b, t) });
-  }
-  if (extra) ps.push(extra);
-  ps.sort((a, b) => b.p - a.p);
-  return ps;
-}
-
-function buildSummary(ghost) {
-  const realB = timeline(HAM);
-  const realLaps = race.laps[String(HAM)];
-  const laps = [];
-  let prevAhead = null;
-  const moves = [];
-  for (let k = 1; k <= TOTAL; k++) {
-    const tg = ghost.bounds[k - 1][1];
-    const order = orderAt(tg, HAM, { code: "YOU", p: k });
-    const gPos = order.findIndex((o) => o.code === "YOU") + 1;
-    const ahead = new Set(order.slice(0, gPos - 1).map((o) => o.code));
-    if (prevAhead) {
-      const passed = [...prevAhead].filter((c) => !ahead.has(c));
-      const lost = [...ahead].filter((c) => !prevAhead.has(c));
-      if (passed.length || lost.length) moves.push({ lap: k, passed, passed_by: lost });
-    }
-    prevAhead = ahead;
-    const ty = ghost.tyres[k - 1];
-    const rty = tyreAt(REAL_STINTS, k);
-    const rPos = realB[k - 1] ? orderAt(realB[k - 1][1], null).findIndex((o) => o.code === "HAM") + 1 : null;
-    laps.push({
-      lap: k,
-      you: +ghost.laps[k - 1].toFixed(2), you_pos: gPos, you_tyre: `${ty.compound[0]}${ty.age}`,
-      ferrari: realLaps[k - 1], ferrari_pos: rPos, ferrari_tyre: `${rty.compound[0]}${rty.age}`,
-      gap_to_ferrari: realB[k - 1] ? +(tg - realB[k - 1][1]).toFixed(2) : null,
-    });
-  }
-  const cls = classify(race, ghost);
-  const me = cls.find((r) => r.ghost);
-  const v = validateStrategy(race, state.stints);
-  const near = cls.filter((r) => Math.abs(r.pos - me.pos) <= 1 && !r.ghost).map((r) => ({ code: r.code, pos: r.pos, gap: +(r.finish - me.finish).toFixed(2) }));
-  return {
-    track: "Marina Bay, Singapore, 62 laps, night race",
-    vsc_laps: race.race.neutralised_laps,
-    race_events: EVENTS.filter((e) => e.kind !== "pit").map((e) => ({ lap: e.lap, text: e.text })),
-    tyre_model: { soft_cliff_after_laps: race.model.cliff_at.SOFT, normal_pit_loss_s: +race.model.pit_loss_green.toFixed(1), vsc_pit_loss_s: +race.model.pit_loss_vsc.toFixed(1) },
-    your_strategy: describe(state.stints),
-    ferrari_strategy: describe(REAL_STINTS),
-    odds_over_reruns: state.odds && !state.odds.dsq ? { runs: state.odds.runs, finishes_by_position: state.odds.pos } : null,
-    result: { your_position: v.dsq ? "DSQ (only one compound used)" : me.pos, ferrari_position: REAL_POS, gap_to_ferrari_at_flag_s: +(ghost.finish - realB[TOTAL - 1][1]).toFixed(2), neighbours: near },
-    position_changes: moves,
-    traffic: trafficSummary(ghost),
-    laps,
-  };
-}
-
-// Spells stuck behind the same car, and moves made on track.
-function trafficSummary(ghost) {
-  const stuck = [];
-  const passes = [];
-  ghost.traffic.forEach((info, i) => {
-    const lap = i + 1;
-    if (info.held) {
-      const run = stuck.at(-1);
-      if (run && run.behind === info.held && run.to >= lap - 2) { run.to = lap; run.time_lost_s += info.lost; run.chances.push(info.chance); }
-      else stuck.push({ behind: info.held, from: lap, to: lap, time_lost_s: info.lost, chances: [info.chance] });
-    }
-    for (const code of info.passed) passes.push({ lap, car: code, while_copying_ferrari: info.mode === "lewis" });
-  });
-  return {
-    stuck_behind: stuck.map((s) => ({
-      car: s.behind, laps: s.from === s.to ? `${s.from}` : `${s.from}-${s.to}`, first_lap: s.from, time_lost_s: +s.time_lost_s.toFixed(1),
-      pass_chance_per_lap: +(Math.max(...s.chances)).toFixed(2),
-    })),
-    passes_on_track: passes,
-  };
-}
-
-function describe(stints) {
-  return stintSpans(stints).map((s) => ({
-    compound: s.compound.toLowerCase(), laps: `${s.from}-${s.end}`, tyre_age_at_start: s.ageAtStart || 0, pitted_end_of_lap: s.i ? s.from - 1 : null,
-  }));
-}
-
-// Built-in radio for when the engineer API is offline or still thinking.
-function localRadio(ghost, summary) {
-  const msgs = [{ lap: 1, from: "engineer", text: "Lights out. Your strategy now, car 44. Ferrari's call is racing next to you." }];
-  for (const p of ghost.pitLaps) {
-    const cheap = VSC.has(p);
-    const next = state.stints.find((s) => s.from === p + 1);
-    msgs.push({ lap: Math.max(1, p - 1), from: "engineer", text: cheap ? "VSC! Box, box, box. Cheapest stop of the night." : `Box next lap. ${next.compound === "SOFT" ? "Softs" : "Mediums"} ready.` });
-    msgs.push({ lap: p + 1, from: "driver", text: "Out of the pits. Tyres feel fresh." });
-  }
-  for (const l of [8, 39]) if (!ghost.pitLaps.includes(l)) msgs.push({ lap: l, from: "engineer", text: "VSC, VSC. Stay above the delta. We are checking." });
-  const { stuck_behind, passes_on_track } = summary.traffic;
-  const firstSpells = stuck_behind.filter((s, i) => stuck_behind.findIndex((x) => x.car === s.car) === i);
-  for (const s of firstSpells.slice(0, 2)) {
-    msgs.push({ lap: s.first_lap, from: "driver", text: `Stuck behind ${s.car}. I can't get close enough to pass.` });
-    if (s.pass_chance_per_lap > 0) {
-      msgs.push({ lap: s.first_lap + 1, from: "engineer", text: `Copy. At this pace it's about ${Math.round(s.pass_chance_per_lap * 100)}% a lap to get by here.` });
-    }
-  }
-  const move = passes_on_track.find((p) => !p.while_copying_ferrari);
-  if (move) msgs.push({ lap: move.lap, from: "engineer", text: `Nice move on ${move.car}. Keep pushing.` });
-  const cliffLap = ghost.tyres.findIndex((t) => t.age > race.model.cliff_at[t.compound] + 6);
-  if (cliffLap >= 0) msgs.push({ lap: cliffLap + 1, from: "driver", text: "These tyres are gone. Completely gone." });
-  const g45 = summary.laps[44].gap_to_ferrari;
-  msgs.push({ lap: 45, from: "engineer", text: Math.abs(g45) < 0.05 ? "Exactly where Ferrari had us. Bold of you." : `Gap to Ferrari's own call: ${Math.abs(g45).toFixed(1)}s ${g45 < 0 ? "ahead" : "behind"}.` });
-  msgs.push({ lap: TOTAL, from: "engineer", text: `Chequered flag. ${typeof summary.result.your_position === "number" ? "P" + summary.result.your_position : "And... we have a problem with the stewards"}.` });
-  return msgs.sort((a, b) => a.lap - b.lap);
-}
-
-function localDebrief(summary) {
-  const pos = summary.result.your_position;
-  const gap = summary.result.gap_to_ferrari_at_flag_s;
-  const better = typeof pos === "number" && pos < REAL_POS;
-  const same = Math.abs(gap) < 0.05;
-  const worst = [...summary.traffic.stuck_behind].sort((a, b) => b.time_lost_s - a.time_lost_s)[0];
-  const why = worst && worst.time_lost_s > 3
-    ? `${worst.time_lost_s.toFixed(0)}s of that was lost stuck behind ${worst.car} on laps ${worst.laps}.`
-    : VSC.has(state.ghost.pitLaps[state.ghost.pitLaps.length - 1]) ? "Stopping under the VSC paid for itself." : "The VSC windows were the cheap stops on offer.";
-  return {
-    headline: typeof pos !== "number" ? "Disqualified" : better ? "You out-strategised Ferrari" : same ? "You are Ferrari now" : pos === REAL_POS ? "Same result, different headache" : "Somehow worse than Ferrari",
-    verdict: same ? "You copied Ferrari's strategy to the lap, so you got Ferrari's result to the hundredth." :
-      `You finished ${Math.abs(gap).toFixed(1)}s ${gap < 0 ? "ahead of" : "behind"} Ferrari's real race. ${why}`,
-    roast: better ? "Maranello would like your number." : "Even the pit wall's group chat is laughing.",
-  };
-}
-
+// ---------------------------------------------------------------- engineer
 async function askEngineer(summary) {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 60000);
@@ -848,15 +715,18 @@ function startRace() {
   const ghost = simulateGhost(race, state.stints);
   const odds = raceOdds(race, state.stints, ODDS_RUNS);
   state.odds = odds;
-  const summary = buildSummary(ghost);
-  Object.assign(state, { ghost, t: 0, playing: true, running: true, finished: false, ai: null, summary, note: "" });
-  state.radio = localRadio(ghost, summary).map((m) => ({ ...m, shown: false }));
+  const summary = buildSummary(race, ghost, state.stints, odds);
+  // The built-in engineer covers every race; Opus, when switched on, rewrites what hasn't played yet.
+  const ai = { debrief: builtInDebrief(race, ghost, summary, BANK, state.stints, odds), builtIn: true };
+  Object.assign(state, { ghost, t: 0, playing: true, running: true, finished: false, ai, summary, note: "" });
+  state.radio = builtInRadio(race, ghost, summary, BANK, state.stints).map((m) => ({ ...m, shown: false }));
   $("radio").innerHTML = "";
   $("tyres").hidden = false;
   $("finish").hidden = true;
   $("pause").textContent = "Pause";
   renderRuler();
 
+  if (!CONFIG.opus) return;
   askEngineer(summary).then((ai) => {
     if (state.ghost !== ghost) return;
     state.ai = ai;
@@ -865,11 +735,7 @@ function startRace() {
     const fresh = (ai.radio || []).filter((m) => m.lap > now).map((m) => ({ ...m, shown: false }));
     state.radio = [...keep, ...fresh].sort((a, b) => a.lap - b.lap);
     if (state.finished) fillDebrief();
-  }).catch((err) => {
-    console.warn("Engineer offline, using built-in radio:", err.message);
-    state.ai = { debrief: localDebrief(summary), offline: true };
-    if (state.finished) fillDebrief();
-  });
+  }).catch((err) => console.warn("Opus engineer unavailable, keeping the built-in lines:", err.message));
 }
 
 function showFinish() {

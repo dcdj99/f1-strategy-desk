@@ -1,3 +1,11 @@
+/* Barlow, bundled (SIL Open Font License, fonts/OFL.txt): the page needs no network. */
+@font-face { font-family: "Barlow"; font-weight: 400; font-display: swap; src: url(fonts/barlow-400.woff2) format("woff2"); }
+@font-face { font-family: "Barlow"; font-weight: 500; font-display: swap; src: url(fonts/barlow-500.woff2) format("woff2"); }
+@font-face { font-family: "Barlow"; font-weight: 600; font-display: swap; src: url(fonts/barlow-600.woff2) format("woff2"); }
+@font-face { font-family: "Barlow Condensed"; font-weight: 500; font-display: swap; src: url(fonts/barlow-condensed-500.woff2) format("woff2"); }
+@font-face { font-family: "Barlow Condensed"; font-weight: 600; font-display: swap; src: url(fonts/barlow-condensed-600.woff2) format("woff2"); }
+@font-face { font-family: "Barlow Condensed"; font-weight: 700; font-display: swap; src: url(fonts/barlow-condensed-700.woff2) format("woff2"); }
+
 :root {
   --bay: #0d1b36;
   --bay-deep: #081227;
@@ -141,6 +149,7 @@ button, select { font: inherit; color: inherit; }
 .odds { margin: 0 0 1.1rem; }
 .odds figcaption { font-family: var(--display); font-size: 1.05rem; color: var(--flood-dim); margin-bottom: 0.4rem; }
 .odds-bars { margin: 0; padding: 0; list-style: none; display: flex; align-items: flex-end; gap: 0.4rem; height: 5.2rem; }
+.odds-bars:empty { display: none; }
 .odds-bars li {
   width: 3rem; height: 100%; display: grid; grid-template-rows: 1fr auto auto; justify-items: center; align-items: end;
   font-family: var(--display); font-variant-numeric: tabular-nums;

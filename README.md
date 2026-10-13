@@ -1,15 +1,24 @@
 # Ferrari Strategy Desk
 
 Re-run Lewis Hamilton's 2026 Singapore Grand Prix with your own pit strategy. A ghost car races
-Ferrari's real strategy, replayed from the real lap data, and Claude Opus 5.5 plays your race engineer.
+Ferrari's real strategy, replayed from the real lap data, with a race engineer on the radio.
+Everything runs offline: the race data, the engineer's lines and the fonts ship with the app.
 
 ## Run it
 
 ```
 npm install
-echo ANTHROPIC_API_KEY=sk-ant-... > .env   # optional: without it the radio uses built-in lines
-npm start                                  # http://localhost:5173
+npm start      # http://localhost:5173
 ```
+
+Optional: to have Claude Opus 5.5 rewrite the radio and debrief for each race, put both of these in `.env`:
+
+```
+OPUS_ENGINEER=1
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+The built-in lines play straight away either way; Opus replaces the ones that haven't played yet.
 
 ## How it works
 
@@ -37,7 +46,15 @@ npm start                                  # http://localhost:5173
   classification matches the official result, that every pass the ghost makes came from Hamilton or a winning
   roll, that the fitted odds match what happened in each band of pace advantage, and that moves come off as
   often as the odds say.
-- `server.mjs` serves the page and asks Opus for the team radio and the post-race debrief.
+- The race engineer is built in. `public/data/engineer.json` holds pre-written radio and debrief lines for
+  every situation the replay produces: the start, pit calls (normal, early, late, under the VSC), where a
+  stop rejoins, staying out under the VSC, being stuck behind a car with the odds of getting by, passes
+  made and lost, tyres past the cliff, the gap to Ferrari's call, Hamilton's Turn 1 moment, retirements,
+  and the flag. `public/engineer.js` reads the race and picks the lines, the same lines for the same plan.
+  The debrief names whatever cost or gained the most time, and says if the race was luckier or unluckier
+  than usual. Tests check every line in the bank comes up in some race and every slot gets filled.
+- `server.mjs` serves the page. With `OPUS_ENGINEER=1` it also asks Opus for the radio and debrief.
+- Fonts: Barlow and Barlow Condensed, bundled in `public/fonts` under the SIL Open Font License.
 
 ## Known limits
 

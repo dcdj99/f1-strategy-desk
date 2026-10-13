@@ -8,6 +8,8 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC = path.join(here, "public");
 const PORT = Number(process.env.PORT || 5173);
 const MODEL = "claude-opus-5-5";
+// The built-in engineer (public/data/engineer.json) needs no network. Opus rewrites the radio only when asked to.
+const OPUS = process.env.OPUS_ENGINEER === "1";
 
 const TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -16,10 +18,12 @@ const TYPES = {
   ".json": "application/json; charset=utf-8",
   ".svg": "image/svg+xml",
   ".png": "image/png",
+  ".woff2": "font/woff2",
+  ".txt": "text/plain; charset=utf-8",
 };
 
 // Credentials resolve from the environment (ANTHROPIC_API_KEY in .env, or an `ant auth login` profile).
-// Created lazily so the server still starts (with built-in radio) when no credentials are set.
+// Created lazily so the server still starts when no credentials are set.
 let client;
 const getClient = () => (client ??= new Anthropic());
 
@@ -105,7 +109,17 @@ async function readBody(req) {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, "http://localhost");
+    if (req.method === "GET" && url.pathname === "/api/config") {
+      res.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
+      res.end(JSON.stringify({ opus: OPUS }));
+      return;
+    }
     if (req.method === "POST" && url.pathname === "/api/engineer") {
+      if (!OPUS) {
+        res.writeHead(404, { "content-type": "application/json" });
+        res.end(JSON.stringify({ error: "Opus engineer is off; set OPUS_ENGINEER=1 to use it" }));
+        return;
+      }
       const summary = await readBody(req);
       try {
         const out = await engineer(summary);
@@ -139,7 +153,7 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Strategy desk on http://localhost:${PORT}`);
-  if (!process.env.ANTHROPIC_API_KEY && !process.env.ANTHROPIC_AUTH_TOKEN) {
-    console.log("No ANTHROPIC_API_KEY set: radio and debrief use the built-in lines. Add it to .env to switch on Opus.");
-  }
+  console.log(OPUS
+    ? "Engineer: Opus rewrites the radio and debrief (OPUS_ENGINEER=1)."
+    : "Engineer: built-in lines, no network needed. Set OPUS_ENGINEER=1 and ANTHROPIC_API_KEY in .env to use Opus.");
 });
