@@ -2,7 +2,9 @@
 
 Run: python.exe -B scripts/build_data.py <output_json_path>
 """
+import bisect
 import json
+import math
 import os
 import re
 import statistics
@@ -296,6 +298,7 @@ def main(out_path):
     race_end = max(b[-1][1] for b in timelines.values() if b) + 20
     grid_n = int(race_end) + 1
     progress = {}
+    geo = {}  # every position sample: (race time, lap fraction, distance from the racing line, x, y)
     for dn in sorted(by_driver):
         samples = []
         chunk = 1800
@@ -315,11 +318,12 @@ def main(out_path):
             t += chunk
         samples.sort()
         # unwrap the lap fraction into continuous laps
-        series, hint, prev_f, u = [], None, None, 0.0
+        series, hint, prev_f, u, rows_geo = [], None, None, 0.0, []
         for st, x, y in samples:
             if x == 0 and y == 0:
                 continue  # samples without a position fix
-            _, f, hint = project(x, y, hint)
+            d2, f, hint = project(x, y, hint)
+            rows_geo.append((st, f, math.sqrt(d2), x, y))
             if prev_f is None:
                 u = f
             else:
@@ -349,23 +353,42 @@ def main(out_path):
                     hi = mid
             (ta, ua), (tb, ub) = series[lo], series[hi]
             return ua + (ub - ua) * (tq - ta) / ((tb - ta) or 1)
+        times = [s[0] for s in series]
+
+        def smooth(tq, W=1.5):
+            # The feed's timestamps jitter by about a tenth of a second, so speeds between neighbouring
+            # samples swing by +-40%. A straight-line fit over +-1.5 s (nearer samples count more)
+            # steadies the motion and still keeps a pit stop's standstill.
+            lo, hi = bisect.bisect_left(times, tq - W), bisect.bisect_right(times, tq + W)
+            sw = sx = sy = sxx = sxy = 0.0
+            for j in range(lo, hi):
+                dt = times[j] - tq
+                w = 1.0 - abs(dt) / W
+                uj = series[j][1]
+                sw += w; sx += w * dt; sy += w * uj; sxx += w * dt * dt; sxy += w * dt * uj
+            den = sw * sxx - sx * sx
+            if hi - lo < 3 or sw < 1e-9 or abs(den) < 1e-9:
+                return interp(tq)
+            return (sy * sxx - sx * sxy) / den
         # Anchor: crossing the line to start lap 2 is exactly one lap of progress.
-        offset = round(1.0 - interp(bounds[1][0]))
+        offset = round(1.0 - smooth(bounds[1][0]))
         finish = bounds[-1][1]
         vals, peak = [], -1e9
         for k in range(grid_n):
-            p = interp(float(k)) + offset
+            p = smooth(float(k)) + offset
             if k > finish:
                 p = min(p, float(len(bounds)))
             peak = max(peak, p)  # never run backwards (projection jitter in the pit box)
             vals.append(int(round(peak * 10000)))
         progress[str(dn)] = vals
+        geo[dn] = rows_geo
         print("progress %s: %d samples, offset %d, laps at flag %.3f (timing says %d)" % (
             dn, len(series), offset, vals[min(grid_n - 1, int(finish))] / 10000, len(bounds)))
 
     # Pit-lane starters wait at the pit exit, which projects onto the track ahead of the grid.
-    # Until the field has gone by and they join, hold them just behind the last car, queued in
-    # the order they left the pit lane.
+    # Until the field has gone by and they join, their progress (which sets the running order)
+    # holds just behind the last car, queued in the order they left the pit lane. Where they
+    # really were ("at", laps) is kept for drawing them in the pit lane.
     first_pos = {}
     for r in sorted(positions, key=lambda r: r["date"]):
         first_pos.setdefault(r["driver_number"], r["position"])
@@ -378,15 +401,86 @@ def main(out_path):
         starters.sort(key=lambda dn: timelines[int(dn)][0][1])
         queue = [dn for dn in progress if dn not in starters]
         for dn in starters:
-            vals = progress[dn]
+            vals, at = progress[dn], []
             for k in range(len(vals)):
                 last = min(progress[g][k] for g in queue) - behind
                 if vals[k] <= last:
-                    pit_lane_starts[dn] = k
+                    pit_lane_starts[dn] = {"join": k, "at": at}
                     break
+                at.append(vals[k])
                 vals[k] = last
             queue.append(dn)
-    print("pit-lane starts (driver: joins at s):", pit_lane_starts)
+    print("pit-lane starts (driver: joins at s):", {dn: v["join"] for dn, v in pit_lane_starts.items()})
+
+    # --- the pit lane, and when each car was in it -----------------------------------
+    # Samples well off the racing line around a timed stop trace the pit lane. Each lane point
+    # keeps the lap fraction it projects to (past the line counts as 1.0+), so a car in the pit
+    # lane is drawn at the lane point matching its progress.
+    OFF = 60  # feed units, about 6 m from the racing line
+
+    def spans_where(rows_, keep):
+        spans, cur = [], None
+        for r in rows_:
+            if not keep(r):
+                continue
+            if cur and r[0] - cur[-1][0] < 3:
+                cur.append(r)
+            else:
+                cur = [r]
+                spans.append(cur)
+        return [s for s in spans if s[-1][0] - s[0][0] >= 5]
+
+    lane_pts = []
+    for dn, rows_ in geo.items():
+        line_times = [timelines[dn][p - 1][1] for p in pit_laps.get(dn, []) if p <= len(timelines[dn])]
+        for span in spans_where(rows_, lambda r: r[2] > OFF):
+            if not any(span[0][0] <= e <= span[-1][0] for e in line_times):
+                continue
+            for a, b in zip(span, span[1:]):
+                # Moving samples only: the fast lane, not the boxes beside it.
+                if math.hypot(b[3] - a[3], b[4] - a[4]) / max(b[0] - a[0], 1e-3) > 50:
+                    lane_pts.append((a[1] + 1.0 if a[1] < 0.5 else a[1], a[3], a[4]))
+    BIN = 0.002  # about 10 m
+    bins = {}
+    for p in lane_pts:
+        bins.setdefault(int(p[0] / BIN), []).append(p)
+    lane = [[statistics.median(q[i] for q in bins[k]) for i in range(3)] for k in sorted(bins) if len(bins[k]) >= 5]
+    for _ in range(2):  # light 3-point smoothing, ends fixed
+        lane = [lane[0]] + [[(a[i] + b[i] + c[i]) / 3 for i in range(3)] for a, b, c in zip(lane, lane[1:], lane[2:])] + [lane[-1]]
+
+    def track_at(f):
+        f %= 1.0
+        for (f0, x0, y0), (f1, x1, y1) in zip(track, track[1:] + [[track[0][0] + 1.0] + track[0][1:]]):
+            if f0 <= f <= f1:
+                k = (f - f0) / ((f1 - f0) or 1)
+                return [x0 + (x1 - x0) * k, y0 + (y1 - y0) * k]
+        return track[0][1:]
+    # Taper into the racing line at both ends, where the lane splits off and merges.
+    lane = [[lane[0][0] - 0.004] + track_at(lane[0][0] - 0.004)] + lane + [[lane[-1][0] + 0.004] + track_at(lane[-1][0] + 0.004)]
+    pit_lane = [[round(f, 5), round(x), round(y)] for f, x, y in lane]
+
+    def lane_dist(x, y):
+        best = float("inf")
+        for (_, x0, y0), (_, x1, y1) in zip(lane, lane[1:]):
+            dx, dy = x1 - x0, y1 - y0
+            s = max(0.0, min(1.0, ((x - x0) * dx + (y - y0) * dy) / ((dx * dx + dy * dy) or 1.0)))
+            best = min(best, math.hypot(x0 + s * dx - x, y0 + s * dy - y))
+        return best
+    # In the pit lane: off the racing line and nearer the lane than the track. Only while the car
+    # is racing: not parked in the garage after retiring, nor driving in after the flag.
+    pit_windows = {}
+    for dn, rows_ in geo.items():
+        done = timelines[dn][-1][1]
+        spans = spans_where(rows_, lambda r: r[2] > OFF and lane_dist(r[3], r[4]) < r[2])
+        wins = [[round(s[0][0], 1), round(min(s[-1][0], done + 60), 1)] for s in spans if s[0][0] < done]
+        if wins:
+            pit_windows[str(dn)] = wins
+    print("pit lane: %d points, lap fraction %.3f to %.3f, up to %.0f m from the racing line" % (
+        len(pit_lane), lane[0][0], lane[-1][0], max(math.sqrt(project(x, y, None)[0]) for _, x, y in lane) / 10.23))
+    for dn in sorted(geo):
+        wins = pit_windows.get(str(dn), [])
+        print("  #%d pit laps %s, in the pit lane %s" % (dn, pit_laps.get(dn, []),
+              ", ".join("%.0f-%.0fs (%.0fs)" % (a, b, b - a) for a, b in wins)))
 
     # --- race events for the ticker and the timeline ------------------------------
     codes = {d["driver_number"]: d["name_acronym"] for d in drivers}
@@ -454,6 +548,8 @@ def main(out_path):
         "track": track,
         "progress": progress,
         "pit_lane_starts": pit_lane_starts,
+        "pit_lane": pit_lane,
+        "pit_windows": pit_windows,
         "events": events,
     }
     with open(out_path, "w", encoding="utf-8") as f:

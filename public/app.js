@@ -1,6 +1,6 @@
 import {
   HAM, simulateGhost, realStrategy, validateStrategy, progressAt, classify, tyreAt, tyreModelLap,
-  realProgress, ghostProgress, timeAtGhostLaps, raceOdds, pitLoss,
+  realProgress, ghostProgress, timeAtGhostLaps, raceOdds, pitLoss, inWindow,
 } from "./sim.js";
 import { buildSummary, builtInRadio, builtInDebrief, stintSpans as spans } from "./engineer.js";
 
@@ -53,12 +53,16 @@ function outOfRace(num) {
   return retired(num) && timeline(num).length < Math.floor(0.9 * TOTAL);
 }
 
-// In the pit lane: the last stretch of an in-lap or the first stretch of an out-lap (official timing).
-function pitting(pitLaps, bounds, t) {
-  const p = progressAt(bounds, t);
-  const lap = Math.floor(p) + 1;
-  const f = p % 1;
-  return (pitLaps.includes(lap) && f > 0.8) || (pitLaps.includes(lap - 1) && f < 0.25);
+// In the pit lane, from the car-position feed. The ghost drives Hamilton's real run down it.
+const realInPit = (num, t) => inWindow(race.pit_windows?.[String(num)], t);
+const ghostInPit = (t) => inWindow(state.ghost?.pitWindows, t);
+// The replay slows to this while you or Hamilton are in the pit lane, so the stop can be seen.
+const PIT_SPEED = 8;
+
+// A pit-lane starter waiting at the pit exit: where it really was (laps), or null once it has joined.
+function startAt(num, t) {
+  const s = race.pit_lane_starts?.[String(num)];
+  return s && t < s.join ? s.at[Math.max(0, Math.floor(t))] / 10000 : null;
 }
 
 // ---------------------------------------------------------------- track geometry
@@ -95,16 +99,26 @@ function layout() {
   const { c, s, scale, minX, maxX, minY, maxY } = best;
   const ox = pad.left + (W - (maxX - minX) * scale) / 2;
   const oy = pad.top + (H - (maxY - minY) * scale) / 2;
+  const toCanvas = (x, y) => [ox + (x * c - y * s - minX) * scale, oy + (x * s + y * c - minY) * scale];
   geo = {
     dpr,
-    pts: pts.map(([f, x, y]) => [f, ox + (x * c - y * s - minX) * scale, oy + (x * s + y * c - minY) * scale]),
+    pts: pts.map(([f, x, y]) => [f, ...toCanvas(x, y)]),
+    lane: [],
+    // Labels stay clear of the pit-wall column; the main straight runs right beside it.
+    labelRight: canvas.width - pad.right + 12 * dpr,
   };
+  // The pit lane runs within 18 m of the track, a few pixels at this scale. Push it out from the
+  // track (keeping its shape) so it reads as its own lane.
+  const lane = (race.pit_lane || []).map(([f, x, y]) => [f, ...toCanvas(x, -y)]);
+  const off = lane.map(([f, x, y]) => { const [tx, ty] = pointAt(f); return [x - tx, y - ty]; });
+  const widest = Math.max(0, ...off.map(([dx, dy]) => Math.hypot(dx, dy)));
+  const k = widest ? Math.max(1, (20 * dpr) / widest) : 1;
+  geo.lane = lane.map(([f], i) => { const [tx, ty] = pointAt(f); return [f, tx + off[i][0] * k, ty + off[i][1] * k]; });
   drawTrackLayer(false);
 }
 
-function pointAt(frac) {
-  const p = geo.pts;
-  frac = ((frac % 1) + 1) % 1;
+// A point along a polyline of [fraction, x, y], clamped to its ends.
+function along(p, frac) {
   let lo = 0, hi = p.length - 1;
   if (frac <= p[0][0]) return [p[0][1], p[0][2]];
   if (frac >= p[hi][0]) return [p[hi][1], p[hi][2]];
@@ -114,6 +128,20 @@ function pointAt(frac) {
   }
   const k = (frac - p[lo][0]) / (p[hi][0] - p[lo][0] || 1);
   return [p[lo][1] + (p[hi][1] - p[lo][1]) * k, p[lo][2] + (p[hi][2] - p[lo][2]) * k];
+}
+
+// On the racing line, `laps` round.
+function pointAt(laps) {
+  return along(geo.pts, ((laps % 1) + 1) % 1);
+}
+
+// In the pit lane, `laps` round. Its points run from before the line (0.95) to past it (1.08).
+function lanePoint(laps) {
+  const L = geo.lane;
+  let f = ((laps % 1) + 1) % 1;
+  if (f < 0.5) f += 1;
+  if (!L.length || f < L[0][0] || f > L[L.length - 1][0]) return pointAt(laps);
+  return along(L, f);
 }
 
 let trackVsc = null;
@@ -127,6 +155,29 @@ function drawTrackLayer(vsc) {
   const path = new Path2D();
   geo.pts.forEach(([, x, y], i) => (i ? path.lineTo(x, y) : path.moveTo(x, y)));
   path.closePath();
+
+  // Pit lane, under the track so it merges where it splits off and rejoins.
+  if (geo.lane.length) {
+    const lane = new Path2D();
+    geo.lane.forEach(([, x, y], i) => (i ? lane.lineTo(x, y) : lane.moveTo(x, y)));
+    g.strokeStyle = "#1a2c50";
+    g.lineWidth = 12 * d;
+    g.stroke(lane);
+    g.strokeStyle = "#8a9bc2";
+    g.lineWidth = 1.5 * d;
+    g.setLineDash([5 * d, 4 * d]);
+    g.stroke(lane);
+    g.setLineDash([]);
+    // Name it near the entry, on the side away from the track, clear of the cars' labels in the pit box.
+    const [f, lx, ly] = geo.lane[Math.round(geo.lane.length * 0.15)];
+    const [tx, ty] = pointAt(f);
+    const n = Math.hypot(lx - tx, ly - ty) || 1;
+    g.font = `600 ${12 * d}px "Barlow Condensed", "Arial Narrow", sans-serif`;
+    g.fillStyle = "#8a9bc2";
+    g.textAlign = "center";
+    g.textBaseline = "middle";
+    g.fillText("Pit lane", lx + ((lx - tx) / n) * 26 * d, ly + ((ly - ty) / n) * 26 * d);
+  }
 
   g.strokeStyle = "#1a2c50";
   g.lineWidth = 22 * d;
@@ -175,7 +226,7 @@ function drawLabel(x, y, text, color, dy = -18, size = 16) {
   ctx.textAlign = "center";
   // Keep long labels on the canvas.
   const half = ctx.measureText(text).width / 2 + 6 * d;
-  x = Math.max(half, Math.min(canvas.width - half, x));
+  x = Math.max(half, Math.min(Math.min(canvas.width, geo.labelRight) - half, x));
   ctx.lineWidth = 4 * d;
   ctx.strokeStyle = "rgba(8,18,39,0.9)";
   ctx.strokeText(text, x, y + dy * d);
@@ -183,8 +234,6 @@ function drawLabel(x, y, text, color, dy = -18, size = 16) {
   ctx.fillText(text, x, y + dy * d);
   ctx.restore();
 }
-
-const realPitLaps = race.pits[String(HAM)] || [];
 
 function render() {
   const t = state.t;
@@ -195,6 +244,13 @@ function render() {
   ctx.drawImage(trackLayer, 0, 0);
 
   const gp = state.ghost ? ghostProgress(race, state.ghost, t) : null;
+  // Hamilton and your ghost, on the racing line or in the pit lane.
+  const rp = realProgress(race, HAM, t);
+  const realPit = realInPit(HAM, t);
+  const [rx, ry] = realPit ? lanePoint(rp) : pointAt(rp);
+  const ghostPit = gp !== null && ghostInPit(t);
+  const [gx, gy] = gp === null ? [rx, ry] : ghostPit ? lanePoint(gp) : pointAt(gp);
+
   let leader = null, ahead = null, behind = null;
   const pitLaneStart = [];
   for (const d of race.drivers) {
@@ -204,22 +260,21 @@ function render() {
     const done = t > b[b.length - 1][1];
     if (done && retired(d.num)) continue;
     const p = realProgress(race, d.num, t);
-    const [x, y] = pointAt(p % 1);
+    // Pit-lane starters wait at the pit exit until the field has gone past.
+    const waiting = startAt(d.num, t);
+    const pit = !done && realInPit(d.num, t);
+    const [x, y] = waiting !== null ? lanePoint(waiting) : pit ? lanePoint(p) : pointAt(p);
     drawCar(x, y, 5.5, d.colour, { alpha: done ? 0.35 : 0.9 });
-    // Pit-lane starters wait behind the field until it has gone past the pit exit.
-    if (t < (race.pit_lane_starts?.[String(d.num)] ?? -1)) pitLaneStart.push({ p, x, y, code: d.code });
-    else if (state.running && !done && pitting(race.pits[String(d.num)] || [], b, t)) drawLabel(x, y, `${d.code} pit`, "#ffb547", -14, 13);
+    if (waiting !== null) pitLaneStart.push({ p, x, y, code: d.code });
+    else if (state.running && pit) drawLabel(x, y, `${d.code} pit`, "#ffb547", -14, 13);
     if (!leader || p > leader.p) leader = { p, x, y, code: d.code };
     if (gp !== null && !done) {
-      if (p > gp && p - gp < 0.15 && (!ahead || p < ahead.p)) ahead = { p, x, y, code: d.code };
-      if (p < gp && gp - p < 0.15 && (!behind || p > behind.p)) behind = { p, x, y, code: d.code };
+      if (p > gp && p - gp < 0.15 && (!ahead || p < ahead.p)) ahead = { p, x, y, code: d.code, pit };
+      if (p < gp && gp - p < 0.15 && (!behind || p > behind.p)) behind = { p, x, y, code: d.code, pit };
     }
   }
   // Under-car labels, skipping any that would land on one already drawn (the field is bunched at the start).
-  const placed = [realProgress(race, HAM, t), gp].filter((v) => v !== null).map((v) => {
-    const [x, y] = pointAt(v % 1);
-    return { x, y };
-  });
+  const placed = [{ x: rx, y: ry }, { x: gx, y: gy }];
   const underLabel = (n, text, color, size = 14) => {
     if (placed.some((q) => Math.hypot(q.x - n.x, q.y - n.y) < 28 * geo.dpr)) return;
     placed.push(n);
@@ -230,22 +285,19 @@ function render() {
     underLabel(last, `${pitLaneStart.map((c) => c.code).join(" ")} from pit lane`, "#ffb547", 13);
   }
   if (leader && t > 0) underLabel(leader, `P1 ${leader.code}`, "#f3eedd");
-  for (const n of [ahead, behind]) if (n && n.code !== leader?.code) underLabel(n, n.code, "#a9b3c7");
+  // Cars in the pit lane already carry a "pit" label with their name.
+  for (const n of [ahead, behind]) if (n && !n.pit && n.code !== leader?.code) underLabel(n, n.code, "#a9b3c7");
 
-  // Ferrari's real Hamilton
-  const realB = timeline(HAM);
-  const rp = realProgress(race, HAM, t);
-  const [rx, ry] = pointAt(rp % 1);
+  // The real Hamilton, on Ferrari's strategy
   drawCar(rx, ry, 8, "#e8112d", { ring: "#ffffff" });
-  const realLabel = state.running && pitting(realPitLaps, realB, t) ? "Ferrari (pit)" : "Ferrari";
+  const realLabel = state.running && realPit ? "Hamilton (pit)" : "Hamilton";
 
   // Your ghost Hamilton
   if (state.ghost) {
-    const [gx, gy] = pointAt(gp % 1);
     drawCar(gx, gy, 9, "rgba(212,232,255,0.92)", { glow: "rgba(212,232,255,0.95)" });
     const info = state.running && t < state.ghost.finish ? state.ghost.traffic[Math.floor(progressAt(state.ghost.bounds, t))] : null;
     const stuck = info?.held ? `You (stuck behind ${info.held}${info.chance ? `, ${Math.round(info.chance * 100)}% a lap to pass` : ""})` : null;
-    const youLabel = pitting(state.ghost.pitLaps, state.ghost.bounds, t) ? "You (pit)" : stuck || "You";
+    const youLabel = ghostPit ? "You (pit)" : stuck || "You";
     if (Math.hypot(gx - rx, gy - ry) < 40 * geo.dpr) {
       drawLabel((gx + rx) / 2, Math.min(gy, ry), `${youLabel} + ${realLabel}`, "#f3eedd");
     } else {
@@ -303,7 +355,7 @@ function updateTower() {
 
   towerList.innerHTML = rows.map((r) => {
     const cls = [r.you ? "you" : "", r.num === HAM ? "ham" : "", r.out ? "out" : ""].join(" ");
-    const note = r.you ? "you" : r.num === HAM ? "Ferrari" : r.out ? "out" : "";
+    const note = r.you ? "you" : r.num === HAM ? "real" : r.out ? "out" : "";
     return `<li class="${cls}"><span class="pos">${r.you ? "P" + r.pos : r.pos}</span><span class="bar" style="background:${r.colour}"></span>` +
       `<span class="code">${r.code}</span><span class="note">${note}</span></li>`;
   }).join("");
@@ -683,7 +735,8 @@ function frame(now) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   if (state.playing) {
-    state.t += dt * state.speed;
+    const pit = state.ghost && (ghostInPit(state.t) || realInPit(HAM, state.t));
+    state.t += dt * (pit ? Math.min(state.speed, PIT_SPEED) : state.speed);
     const realB = timeline(HAM);
     if (state.ghost && state.t >= state.ghost.finish && state.t >= realB[realB.length - 1][1] && !state.finished) {
       state.finished = true;

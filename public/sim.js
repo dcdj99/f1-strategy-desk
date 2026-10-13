@@ -215,8 +215,36 @@ export function simulateGhost(race, stints, { seed = 1 } = {}) {
     else if (realPitLap) from = [lap - 2, lap + 2, lap - 3].find((l) => l >= 2 && l <= total && !vsc.has(l) && !realPits.includes(l) && !realPits.includes(l - 1)) ?? lap;
     profile.push(from);
   }
+  // Every ghost stop drives Hamilton's real run down the pit lane (entry, stop, exit), lined up on
+  // the timing line, which the pit lane crosses.
+  let pitRef = null, pitWindows = [];
+  const realWin = race.pit_windows?.[String(HAM)]?.[0];
+  if (realWin && p0) {
+    const line = realB[p0 - 1][1];
+    pitRef = {
+      lap: p0,
+      line,
+      fin: realProgress(race, HAM, realWin[0]) - (p0 - 1), // how far round the in-lap the pit lane starts
+      fout: realProgress(race, HAM, realWin[1]) - p0,      // how far round the out-lap it ends
+    };
+    pitWindows = pitLaps.map((p) => [bounds[p - 1][1] - (line - realWin[0]), bounds[p - 1][1] + (realWin[1] - line)]);
+  }
   const start = realB[0][0];
-  return { laps, tyres, bounds, pitLaps, profile, traffic, finish: t, total: t - start };
+  return { laps, tyres, bounds, pitLaps, profile, traffic, pitRef, pitWindows, finish: t, total: t - start };
+}
+
+// When the real Hamilton reached `laps` of progress, searching within one of his laps.
+function realTimeAt(race, laps, [lo, hi]) {
+  for (let k = 0; k < 30; k++) {
+    const mid = (lo + hi) / 2;
+    if (realProgress(race, HAM, mid) < laps) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
+// Whether race time t falls in any of these [start, end] windows.
+export function inWindow(windows, t) {
+  return !!windows?.some(([a, z]) => t >= a && t < z);
 }
 
 // Laps completed (with fraction) at race time t, for a timeline of [start, end] pairs.
@@ -245,14 +273,30 @@ export function ghostProgress(race, ghost, t) {
   const b = ghost.bounds;
   if (t < b[0][0]) return realProgress(race, HAM, t);
   if (t >= b[b.length - 1][1]) return b.length;
+  const ref = ghost.pitRef;
+  if (ref) {
+    // In the pit lane: Hamilton's real run down it, lined up on the timing line.
+    const k = ghost.pitWindows.findIndex(([a, z]) => t >= a && t < z);
+    if (k >= 0) {
+      const p = ghost.pitLaps[k];
+      return p + realProgress(race, HAM, ref.line + (t - b[p - 1][1])) - ref.lap;
+    }
+  }
   let i = 0;
   while (i < b.length - 1 && t >= b[i][1]) i++;
-  const tau = (t - b[i][0]) / (b[i][1] - b[i][0]);
   const from = ghost.profile[i];
   const rb = race.timelines[String(HAM)][from - 1];
-  if (!rb || !race.progress?.[String(HAM)]) return i + tau;
-  // Where the real car was at the same point through the borrowed lap, shifted to this lap.
-  const within = realProgress(race, HAM, rb[0] + tau * (rb[1] - rb[0])) - (from - 1);
+  if (!rb || !race.progress?.[String(HAM)]) return i + (t - b[i][0]) / (b[i][1] - b[i][0]);
+  // Where the real car was at the same point through the borrowed lap, stretched to this lap's time
+  // and shifted to this lap. An in-lap borrows only up to the pit lane; an out-lap from where it ends.
+  let [t0, t1] = b[i], [s0, s1] = rb;
+  if (ref) {
+    const kin = ghost.pitLaps.indexOf(i + 1), kout = ghost.pitLaps.indexOf(i);
+    if (kin >= 0) { t1 = ghost.pitWindows[kin][0]; s1 = realTimeAt(race, from - 1 + ref.fin, rb); }
+    if (kout >= 0) { t0 = ghost.pitWindows[kout][1]; s0 = realTimeAt(race, from - 1 + ref.fout, rb); }
+  }
+  const tau = (t - t0) / (t1 - t0);
+  const within = realProgress(race, HAM, s0 + tau * (s1 - s0)) - (from - 1);
   return i + Math.min(1.02, Math.max(-0.02, within));
 }
 

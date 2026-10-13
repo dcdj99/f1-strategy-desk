@@ -38,8 +38,10 @@ Stop the server with Ctrl+C.
    - The marks under the bar show when the VSCs and retirements happened. The pit sheet shows what each
      stop costs (cheaper under the VSC).
    - **Reset to Ferrari's call** puts back the real strategy.
-2. **Press Race.** Your ghost Hamilton (white) races Ferrari's real Hamilton (red) through the field.
-   - Pick a replay speed (1× is real time) and drag along the timeline to jump to any lap.
+2. **Press Race.** Your ghost Hamilton (white) races the real Hamilton on Ferrari's strategy (red) through
+   the field.
+   - Pick a replay speed (1× is real time) and drag along the timeline to jump to any lap. While you or
+     Hamilton are in the pit lane the replay drops to 8×, so you can see the stop.
    - The timing tower shows the order, the big number shows your gap to Ferrari's call, and the pit
      wall talks on the radio: box calls, traffic, the odds of passing the car you're stuck behind.
    - **Pause**, **Restart**, or **Change strategy** to go back to planning.
@@ -67,15 +69,20 @@ elsewhere. Run the tests with `npm test`.
 ## How it works
 
 - `scripts/build_data.py` pulls the race from OpenF1: lap times, stints, pit stops, race control,
-  and every car's position feed. Each position sample is snapped to the track outline, so the map
-  shows where each car really was, including pit-lane crawls and VSC slowdowns. Cars that start
-  from the pit lane would snap onto the track ahead of the grid, so they wait behind the last car
-  until the field has gone past the pit exit. Rebuild with `npm run data` (position downloads are
-  cached in `scripts/.cache`).
+  and every car's position feed. Each position sample (about four a second) is snapped to the track
+  outline, so the map shows where each car really was, including VSC slowdowns. The feed's timestamps
+  jitter, which makes speed between neighbouring samples swing by ±40%, so positions are smoothed with
+  a straight-line fit over ±1.5s before being stored once a second. That cuts the wobble by about 70% and
+  keeps a pit stop's standstill. Rebuild with `npm run data` (position downloads are cached in `scripts/.cache`).
+- The pit lane is traced from every car's stops: samples more than 6 m off the racing line around a timed
+  stop. It runs from 5% of a lap before the timing line to 8% after it, up to 18 m from the racing line. The map draws it pushed further out so it reads as its own lane, and draws cars
+  in it while the position feed puts them there. Cars that start from the pit lane wait at the pit exit
+  and drop to the back of the order until the field has gone by.
 - The ghost replays Hamilton's real laps and swaps in only what your strategy changes: tyre pace from
   a model fitted on 1,045 clean laps (fuel burn, soft vs medium, wear, and a cliff fitted on Hamilton's
   own 44-lap soft stint) and pit cost (23.6s green, 13.8s under the VSC, both measured from real stops).
-  Within each lap it borrows the real car's motion, so it slows where he slowed.
+  Within each lap it borrows the real car's motion, so it slows where he slowed. Every stop, green or VSC,
+  drives Hamilton's real 33s run down the pit lane, standstill included, lined up on the timing line.
 - Traffic follows the ghost. While it is within 0.5s of where Hamilton really was, it gets his real lap,
   including whoever he was stuck behind and whoever he passed. Anywhere else it runs his clean-air pace
   into the real cars at that spot.
@@ -90,8 +97,9 @@ elsewhere. Run the tests with `npm test`.
 - `npm test` checks that Ferrari's strategy reproduces all 62 of Hamilton's laps exactly under any luck, that
   the ghost stays on the real car all race, that position data agrees with official timing, that the full
   classification matches the official result, that every pass the ghost makes came from Hamilton or a winning
-  roll, that the fitted odds match what happened in each band of pace advantage, and that moves come off as
-  often as the odds say.
+  roll, that the fitted odds match what happened in each band of pace advantage, that moves come off as
+  often as the odds say, that every ghost stop stands still as long as Hamilton's real one without jumping
+  or reversing, and that every timed stop shows up as one spell in the pit lane.
 - The race engineer is built in. `public/data/engineer.json` holds pre-written radio and debrief lines for
   every situation the replay produces: the start, pit calls (normal, early, late, under the VSC), where a
   stop rejoins, staying out under the VSC, being stuck behind a car with the odds of getting by, passes
@@ -109,5 +117,7 @@ elsewhere. Run the tests with `npm test`.
 - Cars that started a lap behind the ghost and finish it ahead get past for free; only the ghost rolls.
 - Pace advantage in the passing fit is each car's clean-air pace nearby, which is noisy when a car spends
   long spells in traffic.
+- Every ghost stop is Hamilton's one real stop replayed: the same time in the pit lane and in the box.
+  The pit cost in the strategy comes from all the real stops, so a slow or quick stop doesn't change it.
 - Hard tyres weren't raced, so only softs and mediums are offered.
 - The medium-tyre cliff is assumed (10 laps after the soft's); no medium ran long enough to show one.
