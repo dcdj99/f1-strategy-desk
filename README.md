@@ -4,14 +4,47 @@ Re-run Lewis Hamilton's 2026 Singapore Grand Prix with your own pit strategy. A 
 Ferrari's real strategy, replayed from the real lap data, with a race engineer on the radio.
 Everything runs offline: the race data, the engineer's lines and the fonts ship with the app.
 
+An unofficial fan project, not affiliated with Formula 1, Scuderia Ferrari or OpenF1. Race data comes
+from the free [OpenF1](https://openf1.org) API.
+
 ## Run it
 
+You need [Node.js](https://nodejs.org) 22.9 or newer.
+
 ```
+git clone https://github.com/dcdj99/f1-strategy-desk.git
+cd f1-strategy-desk
 npm install
-npm start      # http://localhost:5173
+npm start
 ```
 
-Optional: to have Claude Opus 5.5 rewrite the radio and debrief for each race, put both of these in `.env`:
+Then open http://localhost:5173. To use another port, set `PORT` (for example `PORT=8080 npm start`).
+Stop the server with Ctrl+C.
+
+## Use it
+
+1. **Plan your strategy.** The bar along the bottom is your race, lap 1 to 62, with Ferrari's real
+   strategy shown underneath. It starts as a copy of Ferrari's call.
+   - Pick your starting tyre (soft or medium).
+   - Click the bar to add a pit stop at that lap, or use **Add stop**. Up to three stops.
+   - Drag a stop along the bar to move it, or use the arrows next to it in the pit sheet. With a stop
+     selected, the arrow keys move it and Delete removes it; the × in the pit sheet removes it too.
+   - Choose the tyre each stop fits. You must use both compounds or the ghost is disqualified.
+   - The marks under the bar show when the VSCs and retirements happened. The pit sheet shows what each
+     stop costs (cheaper under the VSC).
+   - **Reset to Ferrari's call** puts back the real strategy.
+2. **Press Race.** Your ghost Hamilton (white) races Ferrari's real Hamilton (red) through the field.
+   - Pick a replay speed (1× is real time) and drag along the timeline to jump to any lap.
+   - The timing tower shows the order, the big number shows your gap to Ferrari's call, and the pit
+     wall talks on the radio: box calls, traffic, the odds of passing the car you're stuck behind.
+   - **Pause**, **Restart**, or **Change strategy** to go back to planning.
+3. **Read the finish card.** Your result against Ferrari's, how often each position came up over 200
+   reruns with different passing luck, and the race engineer's debrief. **Try another strategy** to go again.
+
+## Optional: Claude as race engineer
+
+To have Claude Opus 5.5 rewrite the radio and debrief for each race, put both of these in a `.env` file
+in the project folder, then restart the server:
 
 ```
 OPUS_ENGINEER=1
@@ -19,6 +52,12 @@ ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 The built-in lines play straight away either way; Opus replaces the ones that haven't played yet.
+
+## Rebuild the data (optional)
+
+The built race data ships in `public/data`. To pull it again from OpenF1 you need Python 3 (standard
+library only): run `npm run data` on Windows, or `python3 scripts/build_data.py public/data/race.json`
+elsewhere. Run the tests with `npm test`.
 
 ## How it works
 
