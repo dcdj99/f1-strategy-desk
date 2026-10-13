@@ -41,7 +41,7 @@ export function tyreAt(stints, lap) {
 }
 
 // Pit cost for boxing at the end of `lap`. VSC stops are cheaper.
-function pitLoss(race, lap) {
+export function pitLoss(race, lap) {
   const m = race.model;
   const vsc = new Set(race.race.neutralised_laps);
   if (vsc.has(lap) && vsc.has(lap + 1)) return m.pit_loss_vsc;
@@ -54,11 +54,30 @@ const pitLapsOf = (stints) => stints.slice(1).map((s) => s.from - 1);
 // Traffic rules for when the ghost is somewhere Hamilton wasn't.
 export const TRAFFIC = {
   sameSpot: 0.5,    // within this many seconds of the real car: it gets Hamilton's real lap, traffic and all
-  followGap: 0.8,   // closest a stuck car runs behind at the line (Hamilton held 0.8s behind Leclerc, laps 2-4 and 26-27)
-  passDelta: 1.0,   // pace advantage per lap needed to pass at Marina Bay (assumption)
-  passCost: 0.3,    // time lost making a pass (assumption)
   dirtyAir: 1.0,    // a car this close ahead at the line counts as traffic
+  justAhead: 0.1,   // a completed move crosses the line at least this far ahead
 };
+
+// Passing odds fitted on every Singapore GP on OpenF1 (scripts/fit_passing.py).
+export function passingModel(race) {
+  const m = race.model.passing;
+  return {
+    chance: (advantage) => 1 / (1 + Math.exp(-(m.a + m.b * advantage))),
+    followGap: m.follow_gap,  // how close a car that can't get by sits at the line
+    passCost: m.pass_cost,    // what a move costs against the attacker's own pace
+    inRange: m.in_range,      // a go at passing needs the lap started this close behind
+  };
+}
+
+// The same draw for the same lap and car in every strategy, so two plans that meet
+// the same car on the same lap get the same luck. Uniform in [0, 1).
+export function luck(seed, lap, num) {
+  let h = Math.imul(seed ^ 0x9e3779b9, 0x85ebca6b) ^ Math.imul(lap + 0x632be5ab, 0xc2b2ae35) ^ Math.imul(num + 0x165667b1, 0x27d4eb2f);
+  h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+  h = Math.imul(h ^ (h >>> 12), 0x297a2d39);
+  h ^= h >>> 15;
+  return (h >>> 0) / 4294967296;
+}
 
 const median = (xs) => {
   const s = [...xs].sort((a, b) => a - b);
@@ -107,7 +126,7 @@ function hamiltonCleanAir(race, modelReal, realPits) {
   return { clean, inTraffic };
 }
 
-export function simulateGhost(race, stints) {
+export function simulateGhost(race, stints, { seed = 1 } = {}) {
   const total = race.race.total_laps;
   const model = race.model;
   const realLaps = race.laps[String(HAM)];
@@ -121,6 +140,7 @@ export function simulateGhost(race, stints) {
   const { clean } = hamiltonCleanAir(race, modelReal, realPits);
   const codes = Object.fromEntries(race.drivers.map((d) => [String(d.num), d.code]));
   const pitsOf = (n) => race.pits[n] || [];
+  const P = passingModel(race);
 
   // What Hamilton's real stop cost on the in-lap and the out-lap, above a clean lap.
   const realIn = {}, realOut = {};
@@ -144,11 +164,11 @@ export function simulateGhost(race, stints) {
 
     const offset = t - realB[lap - 1][0];
     const copying = Math.abs(offset) < TRAFFIC.sameSpot;
-    const info = { mode: copying ? "lewis" : "own", held: null, passed: [], lost: 0 };
+    const info = { mode: copying ? "lewis" : "own", held: null, chance: 0, passed: [], attempts: [], lost: 0 };
+    // What the ghost could do this lap with nobody in the way.
+    const potential = clean[lap - 1] + tyreDelta + pit;
     // Same spot as the real car: Hamilton's real lap, traffic and all. Elsewhere: his clean-air pace.
-    const natural = copying
-      ? (realPitLap ? modelReal(lap) : realLaps[lap - 1]) + tyreDelta + pit
-      : clean[lap - 1] + tyreDelta + pit;
+    const natural = copying ? (realPitLap ? modelReal(lap) : realLaps[lap - 1]) + tyreDelta + pit : potential;
     let end = t + natural;
     const [realS, realE] = realB[lap - 1];
     const ahead = Object.entries(race.timelines)
@@ -156,29 +176,31 @@ export function simulateGhost(race, stints) {
       .sort((a, b) => b[1][lap - 1][0] - a[1][lap - 1][0]);
     for (const [n, b] of ahead) {
       const [carStart, carEnd] = b[lap - 1];
-      if (end >= carEnd + TRAFFIC.followGap) continue;                     // stays clear of this car
+      if (end >= carEnd + P.followGap) continue;                           // never gets close to this car
       if (pitsOf(n).includes(lap) || pitsOf(n).includes(lap - 1)) continue; // it's in the pit lane
-      const canPass = !vsc.has(lap) && (carEnd - carStart) - natural >= TRAFFIC.passDelta;
-      // Hamilton was behind this car at the start of the lap, in the same spot, at least this quick.
-      const lewisDidIt = copying && carStart < realS && natural <= realLaps[lap - 1] + 0.05;
-      if (end < carEnd) {
-        // Gets past this lap.
-        if (lewisDidIt && realE < carEnd) { info.passed.push(codes[n]); continue; }
-        if (canPass) {
-          // The fight costs time; if that drops it back behind at the line, it completes the move next lap.
-          end += TRAFFIC.passCost;
-          if (end < carEnd) info.passed.push(codes[n]);
+      // Hamilton started this lap behind this car, the ghost is where he was and no quicker: his result stands.
+      if (copying && carStart < realS && natural <= realLaps[lap - 1] + 0.05) {
+        if (realE < carEnd) { info.passed.push(codes[n]); continue; }
+        if (realE < carEnd + P.followGap) continue;
+      }
+      // A go at passing needs the lap started in range, no VSC, and no car already holding it up.
+      const advantage = (carEnd - carStart) - potential;
+      const chance = !vsc.has(lap) && !info.held && t - carStart <= P.inRange ? P.chance(advantage) : 0;
+      if (chance > 0) {
+        const made = luck(seed, lap, +n) < chance;
+        info.attempts.push({ car: codes[n], chance, made });
+        if (made) {
+          // The move costs time, but it crosses the line ahead.
+          end = Math.min(end + P.passCost, carEnd - TRAFFIC.justAhead);
+          info.passed.push(codes[n]);
           continue;
         }
-      } else {
-        // Ends up close behind: fine if Hamilton was this close too, or if it is fast enough to pass next lap.
-        if (lewisDidIt && realE < carEnd + TRAFFIC.followGap) continue;
-        if (canPass) continue;
       }
+      // Stuck behind it. Cars further up the road still count: following a car past another isn't a free pass.
       info.held = codes[n];
-      info.lost = carEnd + TRAFFIC.followGap - end;
-      end = carEnd + TRAFFIC.followGap;
-      break;
+      info.chance = chance;
+      info.lost += carEnd + P.followGap - end;
+      end = carEnd + P.followGap;
     }
     const dur = end - t;
     laps.push(dur);
@@ -259,4 +281,17 @@ export function classify(race, ghost) {
   const classified = (r) => r.laps >= total || r.finish > leaderFinish || r.laps >= Math.floor(0.9 * total);
   rows.sort((a, b) => (classified(b) - classified(a)) || (b.laps - a.laps) || (a.finish - b.finish));
   return rows.map((r, i) => ({ ...r, pos: i + 1 }));
+}
+
+// Re-run the same strategy with different passing luck. `pos` counts finishes per position.
+export function raceOdds(race, stints, runs = 200) {
+  const pos = {};
+  let dsq = 0;
+  const v = validateStrategy(race, stints);
+  for (let seed = 1; seed <= runs; seed++) {
+    const me = classify(race, simulateGhost(race, stints, { seed })).find((r) => r.ghost);
+    if (v.dsq) dsq++;
+    else pos[me.pos] = (pos[me.pos] || 0) + 1;
+  }
+  return { runs, pos, dsq };
 }

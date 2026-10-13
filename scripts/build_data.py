@@ -11,6 +11,8 @@ import time
 import urllib.request
 from datetime import datetime, timezone
 
+import fit_passing
+
 BASE = "https://api.openf1.org/v1/"
 SESSION = 11388
 TOTAL_LAPS = 62
@@ -248,6 +250,7 @@ def main(out_path):
     model["pit_loss_green"] = statistics.median(green_losses)
     model["pit_loss_vsc"] = statistics.median(vsc_losses) if vsc_losses else model["pit_loss_green"] * 0.55
     model["pit_loss_samples"] = {"green": len(green_losses), "vsc": [round(v, 2) for v in vsc_losses]}
+    model["passing"] = fit_passing.fit()  # passing odds from every Singapore GP on OpenF1
 
     # --- track outline from the reference driver's fastest clean lap ---------
     ref_table = by_driver[REF_DRIVER]

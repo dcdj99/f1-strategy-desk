@@ -56,6 +56,10 @@
           <p class="finish-kicker" id="finish-kicker">Chequered flag</p>
           <p class="finish-pos" id="finish-pos"></p>
           <p class="finish-compare" id="finish-compare"></p>
+          <figure class="odds" id="odds" hidden>
+            <figcaption id="odds-title"></figcaption>
+            <ol class="odds-bars" id="odds-bars"></ol>
+          </figure>
           <h2 class="finish-headline" id="finish-headline"></h2>
           <p class="finish-verdict" id="finish-verdict"></p>
           <p class="finish-roast" id="finish-roast"></p>
@@ -68,13 +72,14 @@
       <ol id="tower-list"></ol>
     </aside>
 
-    <section class="controls" aria-label="Strategy">
+    <section class="controls" id="controls" data-mode="plan" aria-label="Strategy">
       <div class="ruler-wrap">
         <div class="ruler-head">
           <p class="ruler-title">Your strategy</p>
-          <p class="ruler-hint" id="ruler-hint">Drag the pit markers. Tap a stint to swap tyres.</p>
+          <p class="ruler-hint" id="ruler-hint"></p>
         </div>
         <div class="timeline" id="timeline">
+          <div class="add-hint" id="add-hint" hidden><span></span></div>
           <div class="ruler" id="ruler"></div>
           <div class="strip" id="ferrari-strip" aria-label="Ferrari's real strategy"></div>
           <div class="lane" id="event-lane" aria-label="Race events"></div>
@@ -84,22 +89,27 @@
         </div>
         <p class="warn" id="warn" role="status"></p>
       </div>
-      <div class="buttons">
-        <button class="btn" id="add-stop">Add stop</button>
-        <button class="btn" id="remove-stop">Remove stop</button>
-        <button class="btn" id="load-real">Load Ferrari's call</button>
-        <button class="btn primary" id="race">Race</button>
+      <div class="pitsheet" id="pitsheet">
+        <ol class="stops" id="stops" aria-label="Pit stops"></ol>
+        <div class="sheet-actions">
+          <button class="btn" id="add-stop">Add stop</button>
+          <button class="btn quiet" id="load-real">Reset to Ferrari's call</button>
+          <button class="btn primary" id="race">Race</button>
+        </div>
       </div>
-      <div class="playback">
-        <button class="btn icon" id="pause" aria-label="Pause">Pause</button>
-        <label class="speed">Speed
-          <select id="speed">
-            <option value="30">30×</option>
-            <option value="60" selected>60×</option>
-            <option value="120">120×</option>
-            <option value="240">240×</option>
-          </select>
-        </label>
+      <div class="playback" id="playback" hidden>
+        <div class="speeds" role="radiogroup" aria-label="Replay speed" id="speeds">
+          <button role="radio" data-speed="1" aria-checked="false">1×</button>
+          <button role="radio" data-speed="30" aria-checked="false">30×</button>
+          <button role="radio" data-speed="60" aria-checked="true">60×</button>
+          <button role="radio" data-speed="120" aria-checked="false">120×</button>
+          <button role="radio" data-speed="240" aria-checked="false">240×</button>
+        </div>
+        <div class="playback-actions">
+          <button class="btn" id="restart">Restart</button>
+          <button class="btn" id="pause">Pause</button>
+          <button class="btn quiet" id="edit">Change strategy</button>
+        </div>
       </div>
     </section>
   </main>

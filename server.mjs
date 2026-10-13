@@ -31,12 +31,14 @@ Write two things:
 1. radio: 8 to 12 team-radio messages that play during the replay, each tied to the lap it should appear on.
    Mostly pit wall to car 44, a few short replies from the car. React to what actually happens in the data:
    pit calls a lap before each stop, VSC laps (cheap stops), tyres dropping off past the cliff, positions gained or lost
-   (name the cars), getting stuck behind a slower car or passing one on track (the traffic section), the gap to
-   Ferrari's call, the flag. Under 16 words each. Dry F1 humour is welcome, including
+   (name the cars), getting stuck behind a slower car or passing one on track (the traffic section gives the
+   chance per lap of getting by, from past Singapore races), the gap to Ferrari's call, the flag. Under 16 words each. Dry F1 humour is welcome, including
    the occasional "we are checking". Do not quote or impersonate real team members; the car is just "car 44".
 2. debrief: a headline (under 8 words), a two-sentence verdict that explains with numbers why this strategy beat or
    lost to Ferrari's call, and a one-line roast. If the player beat Ferrari, the roast teases Ferrari; if they lost
    or matched it, the roast teases the player. A DSQ result means they ran only one tyre compound, which is illegal.
+   odds_over_reruns counts where the same strategy finished across reruns with different passing luck: if the race
+   they watched came out luckier or unluckier than usual, say so in the verdict.
 Keep everything good-natured and suitable for a room full of strangers.`;
 
 const SCHEMA = {

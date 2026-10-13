@@ -1,6 +1,6 @@
 import {
   HAM, simulateGhost, realStrategy, validateStrategy, progressAt, classify, tyreAt, tyreModelLap,
-  realProgress, ghostProgress, timeAtGhostLaps,
+  realProgress, ghostProgress, timeAtGhostLaps, raceOdds, pitLoss,
 } from "./sim.js";
 
 const $ = (id) => document.getElementById(id);
@@ -24,7 +24,11 @@ const state = {
   radio: [],        // queued messages {lap, from, text, shown}
   ai: null,         // engineer response once it arrives
   summary: null,
+  odds: null,       // finishing positions over many reruns with different passing luck
+  note: "",         // one-off message under the timeline
 };
+const MAX_STINTS = 4;
+const ODDS_RUNS = 200;
 
 const timeline = (num) => race.timelines[String(num)] || [];
 const leaderFinish = Math.min(
@@ -163,6 +167,9 @@ function drawLabel(x, y, text, color, dy = -18, size = 16) {
   ctx.save();
   ctx.font = `600 ${size * d}px "Barlow Condensed", "Arial Narrow", sans-serif`;
   ctx.textAlign = "center";
+  // Keep long labels on the canvas.
+  const half = ctx.measureText(text).width / 2 + 6 * d;
+  x = Math.max(half, Math.min(canvas.width - half, x));
   ctx.lineWidth = 4 * d;
   ctx.strokeStyle = "rgba(8,18,39,0.9)";
   ctx.strokeText(text, x, y + dy * d);
@@ -241,8 +248,9 @@ function render() {
     const [gx, gy] = pointAt(gp % 1);
     drawTrail(ghostFn, t, "#d4e8ff", true);
     drawCar(gx, gy, 9, "rgba(212,232,255,0.92)", { glow: "rgba(212,232,255,0.95)" });
-    const stuck = state.running && t < state.ghost.finish ? state.ghost.traffic[Math.floor(progressAt(state.ghost.bounds, t))]?.held : null;
-    const youLabel = pitting(state.ghost.pitLaps, state.ghost.bounds, t) ? "You (pit)" : stuck ? `You (stuck behind ${stuck})` : "You";
+    const info = state.running && t < state.ghost.finish ? state.ghost.traffic[Math.floor(progressAt(state.ghost.bounds, t))] : null;
+    const stuck = info?.held ? `You (stuck behind ${info.held}${info.chance ? `, ${Math.round(info.chance * 100)}% a lap to pass` : ""})` : null;
+    const youLabel = pitting(state.ghost.pitLaps, state.ghost.bounds, t) ? "You (pit)" : stuck || "You";
     if (Math.hypot(gx - rx, gy - ry) < 40 * geo.dpr) {
       drawLabel((gx + rx) / 2, Math.min(gy, ry), `${youLabel} + ${realLabel}`, "#f3eedd");
     } else {
@@ -410,26 +418,67 @@ function renderRuler() {
     i = j;
   }
   for (const s of stintSpans(st)) {
-    html += `<button class="stint ${s.compound.toLowerCase()}" data-i="${s.i}" style="left:${pct(s.from)};width:${(s.laps / TOTAL) * 100}%" ` +
-      `aria-label="Stint ${s.i + 1}: ${compoundName(s.compound)} tyres for ${s.laps} laps. Tap to swap.">${compoundName(s.compound)} ${s.laps}</button>`;
+    html += `<div class="stint ${s.compound.toLowerCase()}" style="left:${pct(s.from)};width:${(s.laps / TOTAL) * 100}%">${compoundName(s.compound)} ${s.laps}</div>`;
   }
   st.slice(1).forEach((s, i) => {
-    html += `<button class="pit" data-i="${i + 1}" style="left:${pct(s.from)}" aria-label="Pit stop at end of lap ${s.from - 1}. Use arrow keys to move."><span>Box ${s.from - 1}</span></button>`;
+    html += `<button class="pit" data-i="${i + 1}" style="left:${pct(s.from)}" ` +
+      `aria-label="Stop ${i + 1}: box at the end of lap ${s.from - 1}. Arrow keys move it, Delete removes it."><span>Box ${s.from - 1}</span></button>`;
   });
   ruler.innerHTML = html;
+  renderSheet();
 
   const v2 = validateStrategy(race, st);
   const msgs = [...v2.problems];
   if (v2.dsq) msgs.push("Only one tyre compound: the stewards will disqualify you.");
+  if (state.note) msgs.push(state.note);
   $("warn").textContent = msgs.join(" ");
-  $("race").disabled = !v2.ok || state.running;
-  $("add-stop").disabled = st.length >= 4 || state.running;
-  $("remove-stop").disabled = st.length <= 1 || state.running;
-  $("load-real").disabled = state.running;
+  $("race").disabled = !v2.ok;
+  $("add-stop").disabled = st.length >= MAX_STINTS;
+
+  // Planning shows the pit sheet; racing shows the replay controls.
+  $("controls").dataset.mode = state.running ? "race" : "plan";
+  $("pitsheet").hidden = state.running;
+  $("playback").hidden = !state.running;
   $("ruler-hint").textContent = state.running
     ? "Drag along the timeline to jump to any lap."
-    : "Drag the pit markers. Tap a stint to swap tyres.";
+    : st.length >= MAX_STINTS ? "Drag a stop to move it. Three stops is the limit." : "Click the bar to add a stop. Drag a stop to move it.";
   tl.classList.toggle("scrubbable", state.running);
+  tl.classList.toggle("addable", !state.running && st.length < MAX_STINTS);
+  if (state.running) $("add-hint").hidden = true;
+}
+
+function tyrePick(i, compound, label) {
+  return `<span class="tyre-pick" role="radiogroup" aria-label="${label}">` +
+    ["SOFT", "MEDIUM"].map((c) =>
+      `<button role="radio" class="chip ${c.toLowerCase()}" data-key="tyre-${i}-${c}" data-act="tyre" data-i="${i}" data-c="${c}" ` +
+      `aria-checked="${c === compound}">${compoundName(c)}</button>`).join("") +
+    `</span>`;
+}
+
+// One row per stop: when to box, which tyres go on, and a way to take it out again.
+function renderSheet() {
+  const keep = document.activeElement?.dataset?.key;
+  const st = state.stints;
+  let html = `<li class="stop"><span class="stop-name">Start</span><span class="stop-lap"></span>${tyrePick(0, st[0].compound, "Starting tyres")}</li>`;
+  st.slice(1).forEach((s, k) => {
+    const i = k + 1;
+    const lap = s.from - 1;
+    const loss = pitLoss(race, lap);
+    const cheap = loss < race.model.pit_loss_green - 0.5;
+    html += `<li class="stop${cheap ? " cheap" : ""}">` +
+      `<span class="stop-name">Stop ${i}</span>` +
+      `<span class="stop-lap">` +
+      `<button class="nudge" data-key="nudge-${i}-earlier" data-act="nudge" data-i="${i}" data-d="-1" aria-label="Stop ${i} a lap earlier">‹</button>` +
+      `<span class="lapnum">Lap ${lap}</span>` +
+      `<button class="nudge" data-key="nudge-${i}-later" data-act="nudge" data-i="${i}" data-d="1" aria-label="Stop ${i} a lap later">›</button>` +
+      `</span>` +
+      tyrePick(i, s.compound, `Tyres fitted at stop ${i}`) +
+      `<button class="remove" data-key="remove-${i}" data-act="remove" data-i="${i}" aria-label="Remove stop ${i}">✕</button>` +
+      `<span class="stop-note">${cheap ? `VSC: ${loss.toFixed(0)}s in the pits` : `${loss.toFixed(0)}s in the pits`}</span>` +
+      `</li>`;
+  });
+  $("stops").innerHTML = html;
+  if (keep) $("stops").querySelector(`[data-key="${keep}"]`)?.focus();
 }
 
 function renderStaticTimeline() {
@@ -477,6 +526,30 @@ function movePit(i, from) {
   const max = i + 1 < st.length ? st[i + 1].from - 2 : TOTAL;
   st[i].from = Math.max(min, Math.min(max, from));
   st[i].ageAtStart = 0;
+  state.note = "";
+  renderRuler();
+}
+
+// Box at the end of `lap`: splits the stint it lands in, fitting the other compound.
+function addStopAt(lap) {
+  const st = state.stints;
+  if (st.length >= MAX_STINTS) return;
+  const from = lap + 1;
+  const k = st.findIndex((s, i) => from >= s.from && (i + 1 === st.length || from < st[i + 1].from));
+  const s = st[k];
+  const max = k + 1 < st.length ? st[k + 1].from - 2 : TOTAL;
+  if (k < 0 || from < s.from + 2 || from > max) {
+    state.note = "Stops need at least two laps between them.";
+  } else {
+    st.splice(k + 1, 0, { compound: s.compound === "SOFT" ? "MEDIUM" : "SOFT", from, ageAtStart: 0 });
+    state.note = "";
+  }
+  renderRuler();
+}
+
+function removeStop(i) {
+  state.stints.splice(i, 1);
+  state.note = "";
   renderRuler();
 }
 
@@ -492,13 +565,29 @@ function seekToLaps(laps) {
   updateTower();
 }
 
+// Where on the bar the pointer is, as the lap a stop there would box on.
+const boxLapAt = (ev) => {
+  const r = ruler.getBoundingClientRect();
+  return Math.round(((ev.clientX - r.left) / r.width) * TOTAL);
+};
+
+let dragging = false;
+ruler.addEventListener("pointermove", (e) => {
+  const hint = $("add-hint");
+  const lap = boxLapAt(e);
+  if (state.running || dragging || e.target.closest(".pit") || state.stints.length >= MAX_STINTS || lap < 1 || lap >= TOTAL) {
+    hint.hidden = true;
+    return;
+  }
+  hint.hidden = false;
+  hint.style.left = pct(lap + 1);
+  hint.querySelector("span").textContent = `+ Box ${lap}`;
+});
+ruler.addEventListener("pointerleave", () => ($("add-hint").hidden = true));
 ruler.addEventListener("click", (e) => {
-  const b = e.target.closest(".stint");
-  if (!b || state.running) return;
-  const s = state.stints[+b.dataset.i];
-  s.compound = s.compound === "SOFT" ? "MEDIUM" : "SOFT";
-  s.ageAtStart = 0;
-  renderRuler();
+  if (state.running || e.target.closest(".pit")) return;
+  const lap = boxLapAt(e);
+  if (lap >= 1 && lap < TOTAL) addStopAt(lap);
 });
 
 tl.addEventListener("pointerdown", (e) => {
@@ -525,48 +614,61 @@ tl.addEventListener("pointerdown", (e) => {
   if (!b) return;
   const i = +b.dataset.i;
   b.setPointerCapture(e.pointerId);
+  dragging = true;
+  $("add-hint").hidden = true;
   const move = (ev) => movePit(i, Math.round(lapsAt(ev)) + 1);
-  const up = () => { b.removeEventListener("pointermove", move); b.removeEventListener("pointerup", up); };
+  const up = () => { dragging = false; b.removeEventListener("pointermove", move); b.removeEventListener("pointerup", up); };
   b.addEventListener("pointermove", move);
   b.addEventListener("pointerup", up);
 });
 
 ruler.addEventListener("keydown", (e) => {
   const step = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
-  if (!step) return;
   if (state.running) {
+    if (!step) return;
     e.preventDefault();
     seekToLaps(Math.floor(ghostProgress(race, state.ghost, state.t)) + step);
     return;
   }
   const b = e.target.closest(".pit");
   if (!b) return;
-  e.preventDefault();
   const i = +b.dataset.i;
+  if (e.key === "Delete" || e.key === "Backspace") {
+    e.preventDefault();
+    removeStop(i);
+    $("add-stop").focus();
+    return;
+  }
+  if (!step) return;
+  e.preventDefault();
   movePit(i, state.stints[i].from + step);
   ruler.querySelector(`.pit[data-i="${i}"]`)?.focus();
 });
 
-$("add-stop").addEventListener("click", () => {
+$("stops").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-act]");
+  if (!b || state.running) return;
+  const i = +b.dataset.i;
   const st = state.stints;
-  let longest = 0, len = 0;
-  st.forEach((s, i) => {
-    const l = (i + 1 < st.length ? st[i + 1].from : TOTAL + 1) - s.from;
-    if (l > len) { len = l; longest = i; }
-  });
-  const s = st[longest];
-  const from = s.from + Math.floor(len / 2);
-  st.splice(longest + 1, 0, { compound: s.compound === "SOFT" ? "MEDIUM" : "SOFT", from, ageAtStart: 0 });
-  renderRuler();
+  if (b.dataset.act === "nudge") return movePit(i, st[i].from + +b.dataset.d);
+  if (b.dataset.act === "remove") { removeStop(i); return $("add-stop").focus(); }
+  if (b.dataset.act === "tyre") {
+    st[i].compound = b.dataset.c;
+    st[i].ageAtStart = 0;
+    renderRuler();
+  }
 });
 
-$("remove-stop").addEventListener("click", () => {
-  state.stints.pop();
-  renderRuler();
+$("add-stop").addEventListener("click", () => {
+  // Halfway through the longest stint.
+  const spans = stintSpans(state.stints);
+  const longest = spans.reduce((a, b) => (b.laps > a.laps ? b : a));
+  addStopAt(longest.from + Math.floor(longest.laps / 2) - 1);
 });
 
 $("load-real").addEventListener("click", () => {
   state.stints = REAL_STINTS.map((s) => ({ ...s }));
+  state.note = "";
   renderRuler();
 });
 
@@ -621,6 +723,7 @@ function buildSummary(ghost) {
     tyre_model: { soft_cliff_after_laps: race.model.cliff_at.SOFT, normal_pit_loss_s: +race.model.pit_loss_green.toFixed(1), vsc_pit_loss_s: +race.model.pit_loss_vsc.toFixed(1) },
     your_strategy: describe(state.stints),
     ferrari_strategy: describe(REAL_STINTS),
+    odds_over_reruns: state.odds && !state.odds.dsq ? { runs: state.odds.runs, finishes_by_position: state.odds.pos } : null,
     result: { your_position: v.dsq ? "DSQ (only one compound used)" : me.pos, ferrari_position: REAL_POS, gap_to_ferrari_at_flag_s: +(ghost.finish - realB[TOTAL - 1][1]).toFixed(2), neighbours: near },
     position_changes: moves,
     traffic: trafficSummary(ghost),
@@ -636,13 +739,16 @@ function trafficSummary(ghost) {
     const lap = i + 1;
     if (info.held) {
       const run = stuck.at(-1);
-      if (run && run.behind === info.held && run.to >= lap - 2) { run.to = lap; run.time_lost_s += info.lost; }
-      else stuck.push({ behind: info.held, from: lap, to: lap, time_lost_s: info.lost });
+      if (run && run.behind === info.held && run.to >= lap - 2) { run.to = lap; run.time_lost_s += info.lost; run.chances.push(info.chance); }
+      else stuck.push({ behind: info.held, from: lap, to: lap, time_lost_s: info.lost, chances: [info.chance] });
     }
     for (const code of info.passed) passes.push({ lap, car: code, while_copying_ferrari: info.mode === "lewis" });
   });
   return {
-    stuck_behind: stuck.map((s) => ({ car: s.behind, laps: s.from === s.to ? `${s.from}` : `${s.from}-${s.to}`, first_lap: s.from, time_lost_s: +s.time_lost_s.toFixed(1) })),
+    stuck_behind: stuck.map((s) => ({
+      car: s.behind, laps: s.from === s.to ? `${s.from}` : `${s.from}-${s.to}`, first_lap: s.from, time_lost_s: +s.time_lost_s.toFixed(1),
+      pass_chance_per_lap: +(Math.max(...s.chances)).toFixed(2),
+    })),
     passes_on_track: passes,
   };
 }
@@ -667,6 +773,9 @@ function localRadio(ghost, summary) {
   const firstSpells = stuck_behind.filter((s, i) => stuck_behind.findIndex((x) => x.car === s.car) === i);
   for (const s of firstSpells.slice(0, 2)) {
     msgs.push({ lap: s.first_lap, from: "driver", text: `Stuck behind ${s.car}. I can't get close enough to pass.` });
+    if (s.pass_chance_per_lap > 0) {
+      msgs.push({ lap: s.first_lap + 1, from: "engineer", text: `Copy. At this pace it's about ${Math.round(s.pass_chance_per_lap * 100)}% a lap to get by here.` });
+    }
   }
   const move = passes_on_track.find((p) => !p.while_copying_ferrari);
   if (move) msgs.push({ lap: move.lap, from: "engineer", text: `Nice move on ${move.car}. Keep pushing.` });
@@ -683,11 +792,14 @@ function localDebrief(summary) {
   const gap = summary.result.gap_to_ferrari_at_flag_s;
   const better = typeof pos === "number" && pos < REAL_POS;
   const same = Math.abs(gap) < 0.05;
+  const worst = [...summary.traffic.stuck_behind].sort((a, b) => b.time_lost_s - a.time_lost_s)[0];
+  const why = worst && worst.time_lost_s > 3
+    ? `${worst.time_lost_s.toFixed(0)}s of that was lost stuck behind ${worst.car} on laps ${worst.laps}.`
+    : VSC.has(state.ghost.pitLaps[state.ghost.pitLaps.length - 1]) ? "Stopping under the VSC paid for itself." : "The VSC windows were the cheap stops on offer.";
   return {
     headline: typeof pos !== "number" ? "Disqualified" : better ? "You out-strategised Ferrari" : same ? "You are Ferrari now" : pos === REAL_POS ? "Same result, different headache" : "Somehow worse than Ferrari",
     verdict: same ? "You copied Ferrari's strategy to the lap, so you got Ferrari's result to the hundredth." :
-      `You finished ${Math.abs(gap).toFixed(1)}s ${gap < 0 ? "ahead of" : "behind"} Ferrari's real race. ` +
-      (VSC.has(state.ghost.pitLaps[state.ghost.pitLaps.length - 1]) ? "Stopping under the VSC paid for itself." : "The VSC windows were the cheap stops on offer."),
+      `You finished ${Math.abs(gap).toFixed(1)}s ${gap < 0 ? "ahead of" : "behind"} Ferrari's real race. ${why}`,
     roast: better ? "Maranello would like your number." : "Even the pit wall's group chat is laughing.",
   };
 }
@@ -721,14 +833,23 @@ function frame(now) {
     if (state.t > Math.max(raceEnd, state.ghost ? state.ghost.finish : 0) + 5) state.playing = false;
   }
   render();
-  if (now - (frame.hud || 0) > 150) { frame.hud = now; updateHud(); updateTower(); }
+  if (now - (frame.hud || 0) > 150) {
+    frame.hud = now;
+    updateHud();
+    updateTower();
+    const over = state.t > Math.max(raceEnd, state.ghost ? state.ghost.finish : 0) + 5;
+    $("pause").textContent = state.playing || over ? "Pause" : "Resume";
+    $("pause").disabled = over;
+  }
   requestAnimationFrame(frame);
 }
 
 function startRace() {
   const ghost = simulateGhost(race, state.stints);
+  const odds = raceOdds(race, state.stints, ODDS_RUNS);
+  state.odds = odds;
   const summary = buildSummary(ghost);
-  Object.assign(state, { ghost, t: 0, playing: true, running: true, finished: false, ai: null, summary });
+  Object.assign(state, { ghost, t: 0, playing: true, running: true, finished: false, ai: null, summary, note: "" });
   state.radio = localRadio(ghost, summary).map((m) => ({ ...m, shown: false }));
   $("radio").innerHTML = "";
   $("tyres").hidden = false;
@@ -764,9 +885,51 @@ function showFinish() {
   $("finish-compare").textContent = Math.abs(gap) < 0.05
     ? `Ferrari's call finished P${REAL_POS}. So did you, to the hundredth.`
     : `Ferrari's call finished P${REAL_POS}. You were ${Math.abs(gap).toFixed(1)}s ${gap < 0 ? "faster" : "slower"}.`;
+  renderOdds(pos);
   $("finish").hidden = false;
   fillDebrief();
   $("again").focus();
+}
+
+// Same strategy, many races with different passing luck: how often each position came up.
+function renderOdds(pos) {
+  const o = state.odds;
+  const box = $("odds");
+  if (!o || o.dsq) { box.hidden = true; return; }
+  const places = Object.keys(o.pos).map(Number).sort((a, b) => a - b);
+  if (places.length < 2) {
+    $("odds-title").textContent = `P${places[0]} in all ${o.runs} reruns with different passing luck.`;
+    $("odds-bars").innerHTML = "";
+  } else {
+    $("odds-title").textContent = `This strategy over ${o.runs} reruns with different passing luck:`;
+    const most = Math.max(...Object.values(o.pos));
+    $("odds-bars").innerHTML = places.map((p) => {
+      const share = o.pos[p] / o.runs;
+      return `<li class="${p === pos ? "this" : ""}${p > REAL_POS ? " worse" : p < REAL_POS ? " better" : ""}">` +
+        `<span class="bar" style="height:${(o.pos[p] / most) * 100}%"></span>` +
+        `<span class="share">${Math.round(share * 100)}%</span><span class="place">P${p}</span></li>`;
+    }).join("");
+  }
+  box.hidden = false;
+}
+
+function restartRace() {
+  Object.assign(state, { t: 0, playing: true, finished: false });
+  $("finish").hidden = true;
+  $("pause").textContent = "Pause";
+}
+
+function backToPlan() {
+  Object.assign(state, { ghost: null, t: 0, playing: false, running: false, finished: false });
+  $("finish").hidden = true;
+  $("delta").hidden = true;
+  $("tyres").hidden = true;
+  $("radio").innerHTML = "";
+  renderRuler();
+  updateHud();
+  updateTower();
+  render();
+  $("race").focus();
 }
 
 function fillDebrief() {
@@ -779,22 +942,20 @@ function fillDebrief() {
 }
 
 $("race").addEventListener("click", startRace);
-$("again").addEventListener("click", () => {
-  Object.assign(state, { ghost: null, t: 0, playing: false, running: false, finished: false });
-  $("finish").hidden = true;
-  $("delta").hidden = true;
-  $("tyres").hidden = true;
-  $("radio").innerHTML = "";
-  renderRuler();
-  updateHud();
-  $("race").focus();
-});
+$("again").addEventListener("click", backToPlan);
+$("edit").addEventListener("click", backToPlan);
+$("restart").addEventListener("click", restartRace);
 $("pause").addEventListener("click", () => {
   if (!state.running) return;
   state.playing = !state.playing;
   $("pause").textContent = state.playing ? "Pause" : "Resume";
 });
-$("speed").addEventListener("change", (e) => (state.speed = +e.target.value));
+$("speeds").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-speed]");
+  if (!b) return;
+  state.speed = +b.dataset.speed;
+  for (const x of $("speeds").children) x.setAttribute("aria-checked", String(x === b));
+});
 
 // ---------------------------------------------------------------- boot
 window.addEventListener("resize", () => { layout(); render(); });
@@ -810,11 +971,12 @@ window.desk = { race, state, startRace };
 
 // Screenshot hook: ?at=<race seconds>[&vsc=1 | &stints=M1,S31][&finish=1] starts a race and freezes it at that moment.
 const qs = new URLSearchParams(location.search);
+if (qs.has("vsc")) state.stints = [...REAL_STINTS.map((s) => ({ ...s })), { compound: "SOFT", from: 40, ageAtStart: 0 }];
+if (qs.has("stints")) {
+  state.stints = qs.get("stints").split(",").map((s) => ({ compound: s[0] === "S" ? "SOFT" : "MEDIUM", from: +s.slice(1), ageAtStart: 0 }));
+}
+renderRuler();
 if (qs.has("at")) {
-  if (qs.has("vsc")) state.stints = [...REAL_STINTS.map((s) => ({ ...s })), { compound: "SOFT", from: 40, ageAtStart: 0 }];
-  if (qs.has("stints")) {
-    state.stints = qs.get("stints").split(",").map((s) => ({ compound: s[0] === "S" ? "SOFT" : "MEDIUM", from: +s.slice(1), ageAtStart: 0 }));
-  }
   startRace();
   state.t = +qs.get("at");
   state.playing = false;
