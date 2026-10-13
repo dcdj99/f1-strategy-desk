@@ -70,10 +70,20 @@ elsewhere. Run the tests with `npm test`.
 
 - `scripts/build_data.py` pulls the race from OpenF1: lap times, stints, pit stops, race control,
   and every car's position feed. Each position sample (about four a second) is snapped to the track
-  outline, so the map shows where each car really was, including VSC slowdowns. The feed's timestamps
-  jitter, which makes speed between neighbouring samples swing by ±40%, so positions are smoothed with
-  a straight-line fit over ±1.5s before being stored once a second. That cuts the wobble by about 70% and
-  keeps a pit stop's standstill. Rebuild with `npm run data` (position downloads are cached in `scripts/.cache`).
+  outline, so the map shows where each car really was, including VSC slowdowns. Rebuild with
+  `npm run data` (position downloads are cached in `scripts/.cache`).
+- The feed's timestamps jitter by about a tenth of a second, so speed between neighbouring samples
+  swings by ±40%. Three things keep the motion smooth:
+  - Lap fraction is measured on a typical lap's clock: how far through a lap, by time, a car usually
+    is at each point round the track, taken from 410,000 samples on every clean lap and smoothed. A car
+    at steady progress then brakes and accelerates the way the field did. (Taking it from one lap's
+    clock baked that lap's jitter into the outline: a steady car seemed to swing between 140 and
+    430 km/h down the main straight.)
+  - Each car's progress is smoothed with a straight-line fit over ±1.5s and stored once a second.
+  - The app joins those seconds with a monotone cubic, so speed changes smoothly instead of stepping
+    each second, and a car never runs backwards or overshoots a standstill.
+  A lap now shows about 50 rises and falls in drawn speed, close to the ~40 of real driving, where it
+  showed about 180.
 - The pit lane is traced from every car's stops: samples more than 6 m off the racing line around a timed
   stop. It runs from 5% of a lap before the timing line to 8% after it, up to 18 m from the racing line. The map draws it pushed further out so it reads as its own lane, and draws cars
   in it while the position feed puts them there. Cars that start from the pit lane wait at the pit exit
@@ -99,7 +109,8 @@ elsewhere. Run the tests with `npm test`.
   classification matches the official result, that every pass the ghost makes came from Hamilton or a winning
   roll, that the fitted odds match what happened in each band of pace advantage, that moves come off as
   often as the odds say, that every ghost stop stands still as long as Hamilton's real one without jumping
-  or reversing, and that every timed stop shows up as one spell in the pit lane.
+  or reversing, that every timed stop shows up as one spell in the pit lane, and that cars speed up and
+  slow down on the map like real cars.
 - The race engineer is built in. `public/data/engineer.json` holds pre-written radio and debrief lines for
   every situation the replay produces: the start, pit calls (normal, early, late, under the VSC), where a
   stop rejoins, staying out under the VSC, being stuck behind a car with the odds of getting by, passes

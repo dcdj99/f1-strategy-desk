@@ -257,15 +257,23 @@ export function progressAt(bounds, t) {
   return bounds.length;
 }
 
-// Real on-track progress (laps, fractional) from the car-position feed, on a 1-second race clock.
+// Real on-track progress (laps, fractional) from the car-position feed, stored once a second.
+// Between seconds it follows a monotone cubic, so speed changes smoothly instead of stepping on each
+// second, and a car never runs backwards or overshoots a standstill.
 export function realProgress(race, num, t) {
-  const series = race.progress?.[String(num)];
-  if (!series) return progressAt(race.timelines[String(num)] || [], t);
-  if (t <= 0) return series[0] / 10000;
+  const s = race.progress?.[String(num)];
+  if (!s) return progressAt(race.timelines[String(num)] || [], t);
+  if (t <= 0) return s[0] / 10000;
   const i = Math.floor(t);
-  if (i >= series.length - 1) return series[series.length - 1] / 10000;
+  if (i >= s.length - 1) return s[s.length - 1] / 10000;
   const k = t - i;
-  return (series[i] * (1 - k) + series[i + 1] * k) / 10000;
+  const p1 = s[i], p2 = s[i + 1];
+  const d0 = p1 - (s[i - 1] ?? p1), d1 = p2 - p1, d2 = (s[i + 2] ?? p2) - p2;
+  // Speed at each whole second: the harmonic mean of the neighbouring steps (zero beside a standstill).
+  const m1 = d0 > 0 && d1 > 0 ? (2 * d0 * d1) / (d0 + d1) : 0;
+  const m2 = d1 > 0 && d2 > 0 ? (2 * d1 * d2) / (d1 + d2) : 0;
+  const k2 = k * k, k3 = k2 * k;
+  return ((2 * k3 - 3 * k2 + 1) * p1 + (k3 - 2 * k2 + k) * m1 + (-2 * k3 + 3 * k2) * p2 + (k3 - k2) * m2) / 10000;
 }
 
 // The ghost's on-track progress: its own lap timing, with the in-lap motion of the real lap it borrows.

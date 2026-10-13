@@ -94,6 +94,41 @@ test("the pit lane runs beside the track, from before the line to after it", () 
   assert.ok(metres > 5 && metres < 30, `pit lane ${metres} m from the track`);
 });
 
+test("cars speed up and slow down on the map like real cars, not in jerks", () => {
+  // Drawn speed at 60 frames a second at 1x, mapping progress to the outline as the app does.
+  const T = race.track;
+  const unitsPerM = T.reduce((s, p, i) => (i ? s + Math.hypot(p[1] - T[i - 1][1], p[2] - T[i - 1][2]) : 0), 0) / LAP_M;
+  const at = (laps) => {
+    const f = ((laps % 1) + 1) % 1;
+    let lo = 0, hi = T.length - 1;
+    if (f <= T[0][0]) return T[0].slice(1);
+    if (f >= T[hi][0]) return T[hi].slice(1);
+    while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (T[mid][0] <= f) lo = mid; else hi = mid; }
+    const k = (f - T[lo][0]) / (T[hi][0] - T[lo][0] || 1);
+    return [T[lo][1] + (T[hi][1] - T[lo][1]) * k, T[lo][2] + (T[hi][2] - T[lo][2]) * k];
+  };
+  for (const [num, lap] of [[HAM, 11], [HAM, 30], [1, 25], [16, 50]]) {
+    const [a, z] = race.timelines[String(num)][lap - 1];
+    const v = [];
+    for (let t = a; t < z; t += 1 / 60) {
+      const [x0, y0] = at(realProgress(race, num, t)), [x1, y1] = at(realProgress(race, num, t + 1 / 60));
+      v.push((Math.hypot(x1 - x0, y1 - y0) / unitsPerM) * 60 * 3.6);
+    }
+    // Turning points in speed of 8 km/h or more: a real lap here has about two per corner (~40).
+    let turns = 0, dir = 0, ref = v[0];
+    for (const s of v) {
+      if (dir >= 0 && s < ref - 8) { if (dir > 0) turns++; dir = -1; ref = s; }
+      else if (dir <= 0 && s > ref + 8) { if (dir < 0) turns++; dir = 1; ref = s; }
+      else if ((dir > 0 && s > ref) || (dir < 0 && s < ref) || dir === 0) ref = s;
+    }
+    const jump = Math.max(...v.slice(1).map((s, k) => Math.abs(s - v[k])));
+    console.log(`#${num} lap ${lap}: ${turns} speed turning points, biggest change between frames ${jump.toFixed(1)} km/h`);
+    // Before the averaged lap-fraction scale: about 180 turning points and single-frame jumps of 260+ km/h.
+    assert.ok(turns < 70, `#${num} lap ${lap}: speed turns ${turns} times`);
+    assert.ok(jump < 25, `#${num} lap ${lap}: speed jumps ${jump} km/h in one frame`);
+  }
+});
+
 test("smoothed positions move steadily", () => {
   // Mean change in speed from one second to the next, in thousandths of a lap per second.
   // Resampling the raw feed without smoothing gave about 1.1; the fit brings it to about 0.3.

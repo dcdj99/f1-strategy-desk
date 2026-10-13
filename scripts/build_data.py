@@ -20,6 +20,7 @@ SESSION = 11388
 TOTAL_LAPS = 62
 REF_DRIVER = 3  # Verstappen: led every lap, clean reference lap for the track outline
 CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache")
+OFF_LINE = 60  # position-feed units (about 6 m): further than this from the racing line is off it
 
 
 def get(path):
@@ -266,11 +267,31 @@ def main(out_path):
     q0 = datetime.fromtimestamp(t_start - 1, timezone.utc).strftime(fmt)
     q1 = datetime.fromtimestamp(t_end + 1, timezone.utc).strftime(fmt)
     loc = get("location?session_key=%d&driver_number=%d&date>%s&date<%s" % (SESSION, REF_DRIVER, q0, q1))
-    track = []
-    for p in sorted(loc, key=lambda p: p["date"]):
-        f = (ts(p["date"]) - t_start) / ref["lap_duration"]
-        if -0.01 <= f <= 1.01:
-            track.append([round(f, 5), p["x"], p["y"]])
+    raw = sorted((ts(p["date"]), p["x"], p["y"]) for p in loc if p.get("x") is not None and (p["x"], p["y"]) != (0, 0))
+
+    def raw_at(tq):
+        for (ta, xa, ya), (tb, xb, yb) in zip(raw, raw[1:]):
+            if ta <= tq <= tb:
+                k = (tq - ta) / ((tb - ta) or 1)
+                return (xa + (xb - xa) * k, ya + (yb - ya) * k)
+        return raw[0][1:] if tq < raw[0][0] else raw[-1][1:]
+    # The outline's shape comes from this lap, from the line round to the line. Its points are first
+    # measured by distance round the lap; the lap-fraction scale comes later, from every clean lap.
+    # Closed on the starting point: GPS puts the end of the lap a couple of metres from its start,
+    # a gap every car would jump at the line.
+    verts = [raw_at(t_start)] + [(x, y) for t_, x, y in raw if t_start < t_ < t_end] + [raw_at(t_start)]
+    cum = [0.0]
+    for (xa, ya), (xb, yb) in zip(verts, verts[1:]):
+        cum.append(cum[-1] + math.hypot(xb - xa, yb - ya))
+    # Evenly spaced points, about every 5 m, so the lap-fraction scale bends gently between them.
+    n_pts = max(2, round(cum[-1] / 51.0))
+    track, j = [], 0
+    for k in range(n_pts + 1):
+        s = cum[-1] * k / n_pts
+        while j < len(cum) - 2 and cum[j + 1] < s:
+            j += 1
+        w = (s - cum[j]) / ((cum[j + 1] - cum[j]) or 1)
+        track.append([k / n_pts, verts[j][0] + (verts[j + 1][0] - verts[j][0]) * w, verts[j][1] + (verts[j + 1][1] - verts[j][1]) * w])
 
     # --- real on-track progress for every car, from the car-position feed -------
     # Each position sample is snapped to the reference outline, giving laps-around on a
@@ -290,15 +311,16 @@ def main(out_path):
             px, py = x0 + s * dx, y0 + s * dy
             return (px - x) ** 2 + (py - y) ** 2, (f0 + s * (f1 - f0)) % 1.0, i
         if hint is not None:
-            best = min((seg((hint + k) % n_ref) for k in range(-8, 30)), key=lambda r: r[0])
+            best = min((seg((hint + k) % n_ref) for k in range(-10, 45)), key=lambda r: r[0])
             if best[0] < 300 ** 2:
                 return best
         return min((seg(i) for i in range(n_ref)), key=lambda r: r[0])
 
     race_end = max(b[-1][1] for b in timelines.values() if b) + 20
     grid_n = int(race_end) + 1
-    progress = {}
-    geo = {}  # every position sample: (race time, lap fraction, distance from the racing line, x, y)
+    # Every car's samples, snapped to the outline: (race time, distance round the lap as a fraction,
+    # distance from the racing line, x, y).
+    snapped = {}
     for dn in sorted(by_driver):
         samples = []
         chunk = 1800
@@ -317,13 +339,82 @@ def main(out_path):
             samples += [(ts(p["date"]) - race_t0, p["x"], p["y"]) for p in rows_ if p.get("x") is not None]
             t += chunk
         samples.sort()
-        # unwrap the lap fraction into continuous laps
-        series, hint, prev_f, u, rows_geo = [], None, None, 0.0, []
+        rows_, hint = [], None
         for st, x, y in samples:
             if x == 0 and y == 0:
                 continue  # samples without a position fix
-            d2, f, hint = project(x, y, hint)
-            rows_geo.append((st, f, math.sqrt(d2), x, y))
+            d2, d, hint = project(x, y, hint)
+            rows_.append((st, d, math.sqrt(d2), x, y))
+        snapped[dn] = rows_
+
+    # The lap-fraction scale: how far through a typical lap, by time, a car is at each point round
+    # the track. Laps are drawn and smoothed on this scale, so a car at steady progress follows the
+    # typical lap's braking and acceleration. One lap's clock would carry the feed's timestamp jitter
+    # into the outline (a steady car would appear to speed up and slow down between outline points),
+    # so it is the median over every clean lap in the race.
+    NB = 250  # about 20 m each
+    by_bin = [[] for _ in range(NB)]
+    for dn, rows_ in snapped.items():
+        b = timelines.get(dn) or []
+        pits_ = set(pit_laps.get(dn, []))
+        times_ = [r[0] for r in rows_]
+        for k in range(2, len(b) + 1):
+            if k in neutralised or k in pits_ or (k - 1) in pits_:
+                continue
+            a, z = b[k - 1]
+            for st, d, off, _x, _y in rows_[bisect.bisect_left(times_, a):bisect.bisect_right(times_, z)]:
+                tau = (st - a) / (z - a)
+                if off < OFF_LINE and abs(d - tau) < 0.2:  # on the racing line; not wrapped across the line
+                    by_bin[min(NB - 1, int(d * NB))].append((d, tau))
+    med = [(statistics.median(p[0] for p in c), statistics.median(p[1] for p in c)) for c in by_bin if len(c) >= 20]
+    # Smooth the medians with a local quadratic over +-3 neighbours (about +-60 m, wrapping round the
+    # lap): each median still wobbles by a few per cent, which would show as speed steps.
+    ext = [(d - 1, t - 1) for d, t in med[-3:]] + med + [(d + 1, t + 1) for d, t in med[:3]]
+    smooth_prof = []
+    for i in range(3, len(ext) - 3):
+        A, B = [[0.0] * 3 for _ in range(3)], [0.0] * 3
+        for jj in range(i - 3, i + 4):
+            w = 1.0 - abs(jj - i) / 4.0
+            x = (ext[jj][0] - ext[i][0]) * NB
+            row = (1.0, x, x * x)
+            for r in range(3):
+                B[r] += w * row[r] * ext[jj][1]
+                for c in range(3):
+                    A[r][c] += w * row[r] * row[c]
+        smooth_prof.append((ext[i][0], solve(A, B)[0]))
+    # Shift the curve so it passes through the line at 0 (and 1), where it wraps round.
+    (da, ta), (db, tb) = (smooth_prof[-1][0] - 1, smooth_prof[-1][1] - 1), smooth_prof[0]
+    at_line = ta + (tb - ta) * (0 - da) / (db - da)
+    prof = [(0.0, 0.0)] + [(d, t - at_line) for d, t in smooth_prof] + [(1.0, 1.0)]
+    print("lap-fraction scale crosses the line %.4f of a lap from the outline's start" % at_line)
+    for i in range(1, len(prof)):
+        prof[i] = (prof[i][0], max(prof[i][1], prof[i - 1][1] + 1e-9))  # never back in time
+    clean_samples = sum(len(c) for c in by_bin)
+    # Join the points with a monotone cubic (slopes: harmonic mean of the neighbouring steps, the same
+    # slope either side of the line), so speed changes smoothly round the lap.
+    pd_, pt_ = [p[0] for p in prof], [p[1] for p in prof]
+    sec = [(pt_[i + 1] - pt_[i]) / (pd_[i + 1] - pd_[i]) for i in range(len(prof) - 1)]
+    hm = lambda a, b: 2 * a * b / (a + b) if a > 0 and b > 0 else 0.0
+    tan = [hm(sec[-1], sec[0])] + [hm(a, b) for a, b in zip(sec, sec[1:])] + [hm(sec[-1], sec[0])]
+
+    def scale(d):
+        i = min(max(bisect.bisect_right(pd_, d) - 1, 0), len(pd_) - 2)
+        h = pd_[i + 1] - pd_[i]
+        k = (d - pd_[i]) / h
+        k2, k3 = k * k, k * k * k
+        return ((2 * k3 - 3 * k2 + 1) * pt_[i] + (k3 - 2 * k2 + k) * h * tan[i]
+                + (-2 * k3 + 3 * k2) * pt_[i + 1] + (k3 - k2) * h * tan[i + 1])
+    track = [[round(scale(d), 5), round(x), round(y)] for d, x, y in track]
+    print("lap-fraction scale: %d points from %d samples on clean laps" % (len(prof), clean_samples))
+
+    progress = {}
+    geo = {}  # every position sample: (race time, lap fraction, distance from the racing line, x, y)
+    for dn in sorted(snapped):
+        # unwrap the lap fraction into continuous laps
+        series, prev_f, u, rows_geo = [], None, 0.0, []
+        for st, d, off, x, y in snapped[dn]:
+            f = scale(d)
+            rows_geo.append((st, f, off, x, y))
             if prev_f is None:
                 u = f
             else:
@@ -416,7 +507,6 @@ def main(out_path):
     # Samples well off the racing line around a timed stop trace the pit lane. Each lane point
     # keeps the lap fraction it projects to (past the line counts as 1.0+), so a car in the pit
     # lane is drawn at the lane point matching its progress.
-    OFF = 60  # feed units, about 6 m from the racing line
 
     def spans_where(rows_, keep):
         spans, cur = [], None
@@ -433,7 +523,7 @@ def main(out_path):
     lane_pts = []
     for dn, rows_ in geo.items():
         line_times = [timelines[dn][p - 1][1] for p in pit_laps.get(dn, []) if p <= len(timelines[dn])]
-        for span in spans_where(rows_, lambda r: r[2] > OFF):
+        for span in spans_where(rows_, lambda r: r[2] > OFF_LINE):
             if not any(span[0][0] <= e <= span[-1][0] for e in line_times):
                 continue
             for a, b in zip(span, span[1:]):
@@ -471,7 +561,7 @@ def main(out_path):
     pit_windows = {}
     for dn, rows_ in geo.items():
         done = timelines[dn][-1][1]
-        spans = spans_where(rows_, lambda r: r[2] > OFF and lane_dist(r[3], r[4]) < r[2])
+        spans = spans_where(rows_, lambda r: r[2] > OFF_LINE and lane_dist(r[3], r[4]) < r[2])
         wins = [[round(s[0][0], 1), round(min(s[-1][0], done + 60), 1)] for s in spans if s[0][0] < done]
         if wins:
             pit_windows[str(dn)] = wins
