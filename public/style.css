@@ -199,7 +199,7 @@ button, select { font: inherit; color: inherit; }
 }
 .ruler-scale { position: relative; height: 1.2rem; font-family: var(--display); font-size: 0.85rem; color: var(--flood-dim); }
 .ruler-scale span { position: absolute; transform: translateX(-50%); top: 0.15rem; }
-.ruler-scale .vsc-tag { color: var(--sodium); font-weight: 600; }
+
 .warn { margin: 0.2rem 0 0; min-height: 1.3rem; color: var(--sodium); font-size: 0.95rem; }
 
 .buttons, .playback { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; padding-bottom: 1.5rem; }
@@ -227,3 +227,52 @@ button, select { font: inherit; color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   .vsc-flag, .radio li { animation: none; }
 }
+
+/* ---------- race control ticker (pit-wall column) ---------- */
+.ticker {
+  position: absolute; right: 1.5rem; top: 19.5rem; width: var(--wall); z-index: 2;
+  margin: 0; padding: 0; list-style: none; display: grid; gap: 0.25rem;
+  font-family: var(--display); font-size: 1.1rem;
+}
+.ticker li { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr); gap: 0.5rem; color: var(--flood-dim); }
+.ticker .ttext { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ticker li:last-child { color: var(--flood); }
+.ticker .tlap { font-variant-numeric: tabular-nums; }
+.ticker li.vsc .ttext, .ticker li.flag .ttext { color: var(--sodium); }
+.ticker li.out .ttext { color: #ff8a8a; }
+
+/* ---------- timeline ---------- */
+.timeline { position: relative; }
+.strip { position: relative; height: 1.15rem; margin-top: 4px; border-radius: 3px; background: var(--bay-line); }
+.strip .seg {
+  position: absolute; top: 0; bottom: 0; display: flex; align-items: center; padding-left: 0.4rem;
+  font-family: var(--display); font-size: 0.85rem; font-weight: 600; white-space: nowrap; overflow: hidden;
+  border-left: 2px solid var(--bay-deep);
+}
+.strip .seg:first-child { border-left: 0; border-radius: 3px 0 0 3px; }
+.strip .seg.soft { background: rgba(229, 50, 43, 0.55); color: #fff; }
+.strip .seg.medium { background: rgba(255, 209, 46, 0.55); color: var(--bay-deep); }
+.lane { position: relative; height: 2.3rem; }
+.lane span {
+  position: absolute; top: 0.15rem; transform: translateX(-50%); white-space: nowrap;
+  font-family: var(--display); font-size: 0.85rem; font-weight: 600; color: var(--flood-dim);
+}
+.lane .vsc-tag { color: var(--sodium); }
+.lane .row2 { top: 1.2rem; }
+.lane .out { color: #ff8a8a; }
+.lane .incident { color: var(--ghost); }
+.future {
+  position: absolute; top: 0; right: 0; height: calc(2.6rem + 4px + 1.15rem + 2.3rem);
+  background: rgba(8, 18, 39, 0.6); pointer-events: none; z-index: 4;
+}
+.playhead {
+  position: absolute; top: -0.5rem; height: calc(3.1rem + 4px + 1.15rem + 2.3rem); width: 0; z-index: 5;
+  border-left: 3px solid var(--ghost); box-shadow: 0 0 12px rgba(212, 232, 255, 0.8); pointer-events: none;
+}
+.playhead span {
+  position: absolute; bottom: 100%; left: -1px; transform: translateX(-50%); margin-bottom: 2px;
+  background: var(--ghost); color: var(--bay-deep); font-family: var(--display); font-weight: 700;
+  font-size: 1rem; padding: 0 0.4rem; border-radius: 2px; white-space: nowrap;
+}
+.timeline.scrubbable { cursor: col-resize; }
+.timeline.scrubbable .stint, .timeline.scrubbable .pit { cursor: col-resize; }

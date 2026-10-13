@@ -47,6 +47,8 @@
         </div>
       </div>
 
+      <ol class="ticker" id="ticker" aria-label="Race control"></ol>
+
       <ol class="radio" id="radio" aria-live="polite"></ol>
 
       <div class="finish" id="finish" hidden>
@@ -70,10 +72,16 @@
       <div class="ruler-wrap">
         <div class="ruler-head">
           <p class="ruler-title">Your strategy</p>
-          <p class="ruler-hint">Drag the pit markers. Tap a stint to swap tyres.</p>
+          <p class="ruler-hint" id="ruler-hint">Drag the pit markers. Tap a stint to swap tyres.</p>
         </div>
-        <div class="ruler" id="ruler"></div>
-        <div class="ruler-scale" id="ruler-scale"></div>
+        <div class="timeline" id="timeline">
+          <div class="ruler" id="ruler"></div>
+          <div class="strip" id="ferrari-strip" aria-label="Ferrari's real strategy"></div>
+          <div class="lane" id="event-lane" aria-label="Race events"></div>
+          <div class="ruler-scale" id="ruler-scale"></div>
+          <div class="future" id="future" hidden></div>
+          <div class="playhead" id="playhead" hidden><span id="playhead-label"></span></div>
+        </div>
         <p class="warn" id="warn" role="status"></p>
       </div>
       <div class="buttons">

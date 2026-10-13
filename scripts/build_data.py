@@ -3,6 +3,8 @@
 Run: python.exe -B scripts/build_data.py <output_json_path>
 """
 import json
+import os
+import re
 import statistics
 import sys
 import time
@@ -13,6 +15,7 @@ BASE = "https://api.openf1.org/v1/"
 SESSION = 11388
 TOTAL_LAPS = 62
 REF_DRIVER = 3  # Verstappen: led every lap, clean reference lap for the track outline
+CACHE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".cache")
 
 
 def get(path):
@@ -52,6 +55,7 @@ def solve(a, b):
 
 
 def main(out_path):
+    os.makedirs(CACHE, exist_ok=True)
     drivers = get("drivers?session_key=%d" % SESSION)
     laps = get("laps?session_key=%d" % SESSION)
     stints = get("stints?session_key=%d" % SESSION)
@@ -263,6 +267,144 @@ def main(out_path):
         if -0.01 <= f <= 1.01:
             track.append([round(f, 5), p["x"], p["y"]])
 
+    # --- real on-track progress for every car, from the car-position feed -------
+    # Each position sample is snapped to the reference outline, giving laps-around on a
+    # 1-second race clock. This shows pit-lane crawls, VSC slowdowns and real gaps.
+    ref_pts = [(f, x, y) for f, x, y in track]
+    n_ref = len(ref_pts)
+
+    def project(x, y, hint):
+        def seg(i):
+            f0, x0, y0 = ref_pts[i]
+            f1, x1, y1 = ref_pts[(i + 1) % n_ref]
+            if i + 1 == n_ref:
+                f1 += 1.0
+            dx, dy = x1 - x0, y1 - y0
+            ll = dx * dx + dy * dy or 1.0
+            s = max(0.0, min(1.0, ((x - x0) * dx + (y - y0) * dy) / ll))
+            px, py = x0 + s * dx, y0 + s * dy
+            return (px - x) ** 2 + (py - y) ** 2, (f0 + s * (f1 - f0)) % 1.0, i
+        if hint is not None:
+            best = min((seg((hint + k) % n_ref) for k in range(-8, 30)), key=lambda r: r[0])
+            if best[0] < 300 ** 2:
+                return best
+        return min((seg(i) for i in range(n_ref)), key=lambda r: r[0])
+
+    race_end = max(b[-1][1] for b in timelines.values() if b) + 20
+    grid_n = int(race_end) + 1
+    progress = {}
+    for dn in sorted(by_driver):
+        samples = []
+        chunk = 1800
+        t = race_t0 - 30
+        while t < race_t0 + race_end:
+            q0 = datetime.fromtimestamp(t, timezone.utc).strftime(fmt)
+            q1 = datetime.fromtimestamp(t + chunk, timezone.utc).strftime(fmt)
+            cache = os.path.join(CACHE, "loc_%d_%d.json" % (dn, int(t - race_t0)))
+            if os.path.exists(cache):
+                with open(cache, encoding="utf-8") as fh:
+                    rows_ = json.load(fh)
+            else:
+                rows_ = get("location?session_key=%d&driver_number=%d&date>%s&date<%s" % (SESSION, dn, q0, q1))
+                with open(cache, "w", encoding="utf-8") as fh:
+                    json.dump(rows_, fh)
+            samples += [(ts(p["date"]) - race_t0, p["x"], p["y"]) for p in rows_ if p.get("x") is not None]
+            t += chunk
+        samples.sort()
+        # unwrap the lap fraction into continuous laps
+        series, hint, prev_f, u = [], None, None, 0.0
+        for st, x, y in samples:
+            if x == 0 and y == 0:
+                continue  # samples without a position fix
+            _, f, hint = project(x, y, hint)
+            if prev_f is None:
+                u = f
+            else:
+                d = f - prev_f
+                if d > 0.5:
+                    d -= 1.0
+                elif d < -0.5:
+                    d += 1.0
+                u += d
+            prev_f = f
+            series.append((st, u))
+        bounds = timelines.get(dn) or []
+        if len(series) < 10 or len(bounds) < 2:
+            continue
+
+        def interp(tq, series=series):
+            lo, hi = 0, len(series) - 1
+            if tq <= series[0][0]:
+                return series[0][1]
+            if tq >= series[-1][0]:
+                return series[-1][1]
+            while hi - lo > 1:
+                mid = (lo + hi) // 2
+                if series[mid][0] <= tq:
+                    lo = mid
+                else:
+                    hi = mid
+            (ta, ua), (tb, ub) = series[lo], series[hi]
+            return ua + (ub - ua) * (tq - ta) / ((tb - ta) or 1)
+        # Anchor: crossing the line to start lap 2 is exactly one lap of progress.
+        offset = round(1.0 - interp(bounds[1][0]))
+        finish = bounds[-1][1]
+        vals, peak = [], -1e9
+        for k in range(grid_n):
+            p = interp(float(k)) + offset
+            if k > finish:
+                p = min(p, float(len(bounds)))
+            peak = max(peak, p)  # never run backwards (projection jitter in the pit box)
+            vals.append(int(round(peak * 10000)))
+        progress[str(dn)] = vals
+        print("progress %s: %d samples, offset %d, laps at flag %.3f (timing says %d)" % (
+            dn, len(series), offset, vals[min(grid_n - 1, int(finish))] / 10000, len(bounds)))
+
+    # --- race events for the ticker and the timeline ------------------------------
+    codes = {d["driver_number"]: d["name_acronym"] for d in drivers}
+    events = []
+
+    def add(t_, lap, kind, text, driver=None):
+        events.append({"t": round(t_, 1), "lap": lap, "kind": kind, "text": text, "driver": driver})
+    inc_re = re.compile(
+        r"(?:TURN (\d+) )?INCIDENT INVOLVING CAR (\d+) \((\w+)\) "
+        r"(NOTED|UNDER INVESTIGATION|REVIEWED NO FURTHER INVESTIGATION|NO FURTHER ACTION|WILL BE INVESTIGATED AFTER THE RACE)"
+        r"(?: - (.*))?")
+    seen_inc = set()
+    for m in sorted(rc, key=lambda m: m["date"]):
+        msg = m.get("message") or ""
+        t_ = ts(m["date"]) - race_t0
+        lap = m.get("lap_number") or 1
+        if t_ < 0:
+            continue
+        if msg == "VSC DEPLOYED":
+            add(t_, lap, "vsc", "VSC deployed")
+        elif msg == "VSC ENDING":
+            add(t_, lap, "vsc_end", "VSC ending")
+        elif msg.startswith("MARSHALS ON TRACK"):
+            add(t_, lap, "flag", msg.capitalize().replace("turn", "Turn"))
+        elif msg == "CHEQUERED FLAG":
+            add(t_, lap, "flag", "Chequered flag")
+        else:
+            mm = inc_re.search(msg)
+            if mm:
+                turn, num, code, status, why = mm.groups()
+                key = (num, status)
+                if key in seen_inc or (status == "NOTED" and msg.startswith("UPDATE")):
+                    continue
+                seen_inc.add(key)
+                why = re.sub(r"\s*\(\d\d:\d\d:\d\d\)", "", (why or "")).strip().lower()
+                where = ("Turn %s: " % turn) if turn else ""
+                add(t_, lap, "incident", "%s%s %s (%s)" % (where, code, why or "incident", status.lower()), int(num))
+    for p in pits:
+        t_ = ts(p["date"]) - race_t0
+        add(t_, p["lap_number"], "pit", "%s pits" % codes.get(p["driver_number"], p["driver_number"]), p["driver_number"])
+    leader_finish = min(b[TOTAL_LAPS - 1][1] for b in timelines.values() if len(b) >= TOTAL_LAPS)
+    for dn, b in timelines.items():
+        if b and len(b) < TOTAL_LAPS and b[-1][1] < leader_finish:
+            add(b[-1][1], len(b) + 1, "out", "%s retires" % codes.get(dn, dn), dn)
+    events.sort(key=lambda e: e["t"])
+
     # --- final classification -------------------------------------------------
     last_pos = {}
     for p in sorted(positions, key=lambda p: p["date"]):
@@ -282,6 +424,8 @@ def main(out_path):
         "pits": {str(dn): sorted(v) for dn, v in pit_laps.items()},
         "model": model,
         "track": track,
+        "progress": progress,
+        "events": events,
     }
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(out, f, separators=(",", ":"))
@@ -295,7 +439,8 @@ def main(out_path):
     print("vsc samples:", model["pit_loss_samples"]["vsc"], " HAM base %.3f" % base[HAM])
     print("ref lap: driver %d lap %d %.3fs, %d track points" % (REF_DRIVER, ref["lap_number"], ref["lap_duration"], len(track)))
     print("final positions:", sorted(((v, next(d["name_acronym"] for d in drivers if d["driver_number"] == k)) for k, v in last_pos.items())))
-    print("wrote", out_path)
+    print("events:", len(events), sorted(set(e["kind"] for e in events)))
+    print("wrote", out_path, "%.1f MB" % (os.path.getsize(out_path) / 1e6))
 
 
 if __name__ == "__main__":

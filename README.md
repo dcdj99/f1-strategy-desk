@@ -13,17 +13,22 @@ npm start                                  # http://localhost:5173
 
 ## How it works
 
-- `scripts/build_data.py` pulls the race from OpenF1 (lap times, stints, pit stops, VSC laps, car
-  positions for the track outline) and fits the tyre model. Rebuild with `npm run data`.
-- The tyre model is fitted on 1,045 clean laps: fuel burn, soft vs medium pace, linear wear, and a
-  wear cliff fitted on Hamilton's own 44-lap soft stint. Pit loss is 23.6s green and 13.8s under the VSC,
-  both measured from real stops.
-- `public/sim.js` runs the ghost. `npm test` checks that Ferrari's real strategy reproduces Hamilton's
-  real race to within 3 seconds and his real P6.
+- `scripts/build_data.py` pulls the race from OpenF1: lap times, stints, pit stops, race control,
+  and every car's position feed. Each position sample is snapped to the track outline, so the map
+  shows where each car really was, including pit-lane crawls and VSC slowdowns. Rebuild with
+  `npm run data` (position downloads are cached in `scripts/.cache`).
+- The ghost replays Hamilton's real laps and swaps in only what your strategy changes: tyre pace from
+  a model fitted on 1,045 clean laps (fuel burn, soft vs medium, wear, and a cliff fitted on Hamilton's
+  own 44-lap soft stint) and pit cost (23.6s green, 13.8s under the VSC, both measured from real stops).
+  Within each lap it borrows the real car's motion, so it slows where he slowed.
+- `npm test` checks that Ferrari's strategy reproduces all 62 of Hamilton's laps exactly, that the
+  ghost stays on the real car all race, that position data agrees with official timing, and that the
+  full classification matches the official result.
 - `server.mjs` serves the page and asks Opus for the team radio and the post-race debrief.
 
 ## Known limits
 
-- The ghost doesn't get stuck in traffic, so it overtakes more easily than a real car at Marina Bay.
+- The ghost keeps Hamilton's real traffic lap by lap, but cars don't react to it: it can pass anyone
+  without being held up.
 - Hard tyres weren't raced, so only softs and mediums are offered.
 - The medium-tyre cliff is assumed (10 laps after the soft's); no medium ran long enough to show one.
