@@ -241,7 +241,8 @@ function render() {
     const [gx, gy] = pointAt(gp % 1);
     drawTrail(ghostFn, t, "#d4e8ff", true);
     drawCar(gx, gy, 9, "rgba(212,232,255,0.92)", { glow: "rgba(212,232,255,0.95)" });
-    const youLabel = pitting(state.ghost.pitLaps, state.ghost.bounds, t) ? "You (pit)" : "You";
+    const stuck = state.running && t < state.ghost.finish ? state.ghost.traffic[Math.floor(progressAt(state.ghost.bounds, t))]?.held : null;
+    const youLabel = pitting(state.ghost.pitLaps, state.ghost.bounds, t) ? "You (pit)" : stuck ? `You (stuck behind ${stuck})` : "You";
     if (Math.hypot(gx - rx, gy - ry) < 40 * geo.dpr) {
       drawLabel((gx + rx) / 2, Math.min(gy, ry), `${youLabel} + ${realLabel}`, "#f3eedd");
     } else {
@@ -622,7 +623,27 @@ function buildSummary(ghost) {
     ferrari_strategy: describe(REAL_STINTS),
     result: { your_position: v.dsq ? "DSQ (only one compound used)" : me.pos, ferrari_position: REAL_POS, gap_to_ferrari_at_flag_s: +(ghost.finish - realB[TOTAL - 1][1]).toFixed(2), neighbours: near },
     position_changes: moves,
+    traffic: trafficSummary(ghost),
     laps,
+  };
+}
+
+// Spells stuck behind the same car, and moves made on track.
+function trafficSummary(ghost) {
+  const stuck = [];
+  const passes = [];
+  ghost.traffic.forEach((info, i) => {
+    const lap = i + 1;
+    if (info.held) {
+      const run = stuck.at(-1);
+      if (run && run.behind === info.held && run.to >= lap - 2) { run.to = lap; run.time_lost_s += info.lost; }
+      else stuck.push({ behind: info.held, from: lap, to: lap, time_lost_s: info.lost });
+    }
+    for (const code of info.passed) passes.push({ lap, car: code, while_copying_ferrari: info.mode === "lewis" });
+  });
+  return {
+    stuck_behind: stuck.map((s) => ({ car: s.behind, laps: s.from === s.to ? `${s.from}` : `${s.from}-${s.to}`, first_lap: s.from, time_lost_s: +s.time_lost_s.toFixed(1) })),
+    passes_on_track: passes,
   };
 }
 
@@ -642,6 +663,13 @@ function localRadio(ghost, summary) {
     msgs.push({ lap: p + 1, from: "driver", text: "Out of the pits. Tyres feel fresh." });
   }
   for (const l of [8, 39]) if (!ghost.pitLaps.includes(l)) msgs.push({ lap: l, from: "engineer", text: "VSC, VSC. Stay above the delta. We are checking." });
+  const { stuck_behind, passes_on_track } = summary.traffic;
+  const firstSpells = stuck_behind.filter((s, i) => stuck_behind.findIndex((x) => x.car === s.car) === i);
+  for (const s of firstSpells.slice(0, 2)) {
+    msgs.push({ lap: s.first_lap, from: "driver", text: `Stuck behind ${s.car}. I can't get close enough to pass.` });
+  }
+  const move = passes_on_track.find((p) => !p.while_copying_ferrari);
+  if (move) msgs.push({ lap: move.lap, from: "engineer", text: `Nice move on ${move.car}. Keep pushing.` });
   const cliffLap = ghost.tyres.findIndex((t) => t.age > race.model.cliff_at[t.compound] + 6);
   if (cliffLap >= 0) msgs.push({ lap: cliffLap + 1, from: "driver", text: "These tyres are gone. Completely gone." });
   const g45 = summary.laps[44].gap_to_ferrari;
@@ -780,10 +808,13 @@ requestAnimationFrame((now) => { last = now; frame(now); });
 // For the console and quick checks
 window.desk = { race, state, startRace };
 
-// Screenshot hook: ?at=<race seconds>[&vsc=1][&finish=1] starts a race and freezes it at that moment.
+// Screenshot hook: ?at=<race seconds>[&vsc=1 | &stints=M1,S31][&finish=1] starts a race and freezes it at that moment.
 const qs = new URLSearchParams(location.search);
 if (qs.has("at")) {
   if (qs.has("vsc")) state.stints = [...REAL_STINTS.map((s) => ({ ...s })), { compound: "SOFT", from: 40, ageAtStart: 0 }];
+  if (qs.has("stints")) {
+    state.stints = qs.get("stints").split(",").map((s) => ({ compound: s[0] === "S" ? "SOFT" : "MEDIUM", from: +s.slice(1), ageAtStart: 0 }));
+  }
   startRace();
   state.t = +qs.get("at");
   state.playing = false;

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  simulateGhost, realStrategy, classify, validateStrategy, realProgress, ghostProgress, timeAtGhostLaps, HAM,
+  simulateGhost, realStrategy, classify, validateStrategy, realProgress, ghostProgress, timeAtGhostLaps, HAM, TRAFFIC,
 } from "../public/sim.js";
 
 const race = JSON.parse(readFileSync(new URL("../public/data/race.json", import.meta.url), "utf8"));
@@ -77,6 +77,67 @@ test("scrubbing: time at a lap count round-trips through ghost timing", () => {
     const t = timeAtGhostLaps(ghost, laps);
     const i = Math.floor(laps);
     assert.ok(t >= ghost.bounds[i][0] && t <= ghost.bounds[i][1]);
+  }
+});
+
+const DIVERGING = {
+  "early stop": [{ compound: "MEDIUM", from: 1, ageAtStart: 0 }, { compound: "SOFT", from: 11, ageAtStart: 0 }],
+  "long first stint": [{ compound: "MEDIUM", from: 1, ageAtStart: 0 }, { compound: "SOFT", from: 31, ageAtStart: 0 }],
+  "soft start": [{ compound: "SOFT", from: 1, ageAtStart: 0 }, { compound: "MEDIUM", from: 26, ageAtStart: 0 }],
+  "VSC two-stop": vscTwoStop(),
+  "three stops": [{ compound: "SOFT", from: 1, ageAtStart: 0 }, { compound: "MEDIUM", from: 13, ageAtStart: 0 },
+    { compound: "SOFT", from: 29, ageAtStart: 0 }, { compound: "SOFT", from: 46, ageAtStart: 0 }],
+};
+const inPits = (num, lap) => (race.pits[String(num)] || []).some((p) => p === lap || p === lap - 1);
+
+test("traffic: every car the ghost gets past on track, it earned the pass", () => {
+  for (const [name, st] of Object.entries(DIVERGING)) {
+    const g = simulateGhost(race, st);
+    for (let lap = 1; lap <= 62; lap++) {
+      const [s, e] = g.bounds[lap - 1];
+      for (const d of race.drivers) {
+        const b = race.timelines[String(d.num)];
+        if (d.num === HAM || !b[lap - 1] || inPits(d.num, lap)) continue;
+        const [cs, ce] = b[lap - 1];
+        if (!(cs < s && ce > e)) continue; // started the lap ahead, finished it behind: a pass
+        const info = g.traffic[lap - 1];
+        assert.ok(info.passed.includes(d.code), `${name} lap ${lap}: got past ${d.code} without a pass`);
+        if (info.mode === "lewis") {
+          // Copying Hamilton: only passes he really made on this lap.
+          const [rs, re] = realBounds[lap - 1];
+          const lewisPassed = cs < rs && ce > re;
+          const fastEnough = (ce - cs) - (e - s) >= TRAFFIC.passDelta;
+          assert.ok(lewisPassed || fastEnough, `${name} lap ${lap}: copied a pass on ${d.code} that Hamilton never made`);
+        }
+        assert.ok(!race.race.neutralised_laps.includes(lap), `${name} lap ${lap}: passed ${d.code} under the VSC`);
+      }
+    }
+  }
+});
+
+test("traffic: when held up, the ghost sits exactly the following gap behind that car", () => {
+  let heldLaps = 0;
+  for (const [name, st] of Object.entries(DIVERGING)) {
+    const g = simulateGhost(race, st);
+    g.traffic.forEach((info, i) => {
+      if (!info.held) return;
+      heldLaps++;
+      const d = race.drivers.find((x) => x.code === info.held);
+      const carEnd = race.timelines[String(d.num)][i][1];
+      assert.ok(Math.abs(g.bounds[i][1] - (carEnd + TRAFFIC.followGap)) < 1e-6, `${name} lap ${i + 1}`);
+    });
+  }
+  console.log(`held-up laps across test strategies: ${heldLaps}`);
+  assert.ok(heldLaps > 0, "no strategy ever met traffic");
+});
+
+test("traffic: the ghost only copies Hamilton's lap while it is where he was", () => {
+  for (const [name, st] of Object.entries(DIVERGING)) {
+    const g = simulateGhost(race, st);
+    g.traffic.forEach((info, i) => {
+      const offset = Math.abs(g.bounds[i][0] - realBounds[i][0]);
+      assert.equal(info.mode, offset < TRAFFIC.sameSpot ? "lewis" : "own", `${name} lap ${i + 1}`);
+    });
   }
 });
 
