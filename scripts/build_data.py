@@ -363,6 +363,31 @@ def main(out_path):
         print("progress %s: %d samples, offset %d, laps at flag %.3f (timing says %d)" % (
             dn, len(series), offset, vals[min(grid_n - 1, int(finish))] / 10000, len(bounds)))
 
+    # Pit-lane starters wait at the pit exit, which projects onto the track ahead of the grid.
+    # Until the field has gone by and they join, hold them just behind the last car, queued in
+    # the order they left the pit lane.
+    first_pos = {}
+    for r in sorted(positions, key=lambda r: r["date"]):
+        first_pos.setdefault(r["driver_number"], r["position"])
+    pole = next((dn for dn, pos in first_pos.items() if pos == 1), None)
+    behind = 20  # 0.002 laps, about 10 m
+    pit_lane_starts = {}
+    if pole is not None and str(pole) in progress:
+        pole_p0 = progress[str(pole)][0]
+        starters = [dn for dn in progress if progress[dn][0] > pole_p0 + behind]
+        starters.sort(key=lambda dn: timelines[int(dn)][0][1])
+        queue = [dn for dn in progress if dn not in starters]
+        for dn in starters:
+            vals = progress[dn]
+            for k in range(len(vals)):
+                last = min(progress[g][k] for g in queue) - behind
+                if vals[k] <= last:
+                    pit_lane_starts[dn] = k
+                    break
+                vals[k] = last
+            queue.append(dn)
+    print("pit-lane starts (driver: joins at s):", pit_lane_starts)
+
     # --- race events for the ticker and the timeline ------------------------------
     codes = {d["driver_number"]: d["name_acronym"] for d in drivers}
     events = []
@@ -428,6 +453,7 @@ def main(out_path):
         "model": model,
         "track": track,
         "progress": progress,
+        "pit_lane_starts": pit_lane_starts,
         "events": events,
     }
     with open(out_path, "w", encoding="utf-8") as f:

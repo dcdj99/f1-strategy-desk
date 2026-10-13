@@ -24,8 +24,10 @@ The built-in lines play straight away either way; Opus replaces the ones that ha
 
 - `scripts/build_data.py` pulls the race from OpenF1: lap times, stints, pit stops, race control,
   and every car's position feed. Each position sample is snapped to the track outline, so the map
-  shows where each car really was, including pit-lane crawls and VSC slowdowns. Rebuild with
-  `npm run data` (position downloads are cached in `scripts/.cache`).
+  shows where each car really was, including pit-lane crawls and VSC slowdowns. Cars that start
+  from the pit lane would snap onto the track ahead of the grid, so they wait behind the last car
+  until the field has gone past the pit exit. Rebuild with `npm run data` (position downloads are
+  cached in `scripts/.cache`).
 - The ghost replays Hamilton's real laps and swaps in only what your strategy changes: tyre pace from
   a model fitted on 1,045 clean laps (fuel burn, soft vs medium, wear, and a cliff fitted on Hamilton's
   own 44-lap soft stint) and pit cost (23.6s green, 13.8s under the VSC, both measured from real stops).

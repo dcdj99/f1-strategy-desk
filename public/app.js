@@ -196,6 +196,7 @@ function render() {
 
   const gp = state.ghost ? ghostProgress(race, state.ghost, t) : null;
   let leader = null, ahead = null, behind = null;
+  const pitLaneStart = [];
   for (const d of race.drivers) {
     if (d.num === HAM) continue;
     const b = timeline(d.num);
@@ -205,15 +206,31 @@ function render() {
     const p = realProgress(race, d.num, t);
     const [x, y] = pointAt(p % 1);
     drawCar(x, y, 5.5, d.colour, { alpha: done ? 0.35 : 0.9 });
-    if (state.running && !done && pitting(race.pits[String(d.num)] || [], b, t)) drawLabel(x, y, `${d.code} pit`, "#ffb547", -14, 13);
+    // Pit-lane starters wait behind the field until it has gone past the pit exit.
+    if (t < (race.pit_lane_starts?.[String(d.num)] ?? -1)) pitLaneStart.push({ p, x, y, code: d.code });
+    else if (state.running && !done && pitting(race.pits[String(d.num)] || [], b, t)) drawLabel(x, y, `${d.code} pit`, "#ffb547", -14, 13);
     if (!leader || p > leader.p) leader = { p, x, y, code: d.code };
     if (gp !== null && !done) {
       if (p > gp && p - gp < 0.15 && (!ahead || p < ahead.p)) ahead = { p, x, y, code: d.code };
       if (p < gp && gp - p < 0.15 && (!behind || p > behind.p)) behind = { p, x, y, code: d.code };
     }
   }
-  if (leader && t > 0) drawLabel(leader.x, leader.y, `P1 ${leader.code}`, "#f3eedd", 22, 14);
-  for (const n of [ahead, behind]) if (n && n.code !== leader?.code) drawLabel(n.x, n.y, n.code, "#a9b3c7", 22, 14);
+  // Under-car labels, skipping any that would land on one already drawn (the field is bunched at the start).
+  const placed = [realProgress(race, HAM, t), gp].filter((v) => v !== null).map((v) => {
+    const [x, y] = pointAt(v % 1);
+    return { x, y };
+  });
+  const underLabel = (n, text, color, size = 14) => {
+    if (placed.some((q) => Math.hypot(q.x - n.x, q.y - n.y) < 28 * geo.dpr)) return;
+    placed.push(n);
+    drawLabel(n.x, n.y, text, color, 22, size);
+  };
+  if (pitLaneStart.length) {
+    const last = pitLaneStart.reduce((a, c) => (c.p < a.p ? c : a));
+    underLabel(last, `${pitLaneStart.map((c) => c.code).join(" ")} from pit lane`, "#ffb547", 13);
+  }
+  if (leader && t > 0) underLabel(leader, `P1 ${leader.code}`, "#f3eedd");
+  for (const n of [ahead, behind]) if (n && n.code !== leader?.code) underLabel(n, n.code, "#a9b3c7");
 
   // Ferrari's real Hamilton
   const realB = timeline(HAM);
