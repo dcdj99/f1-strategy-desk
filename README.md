@@ -7,6 +7,11 @@ Everything runs offline: the race data, the engineer's lines and the fonts ship 
 An unofficial fan project, not affiliated with Formula 1, Scuderia Ferrari or OpenF1. Race data comes
 from the free [OpenF1](https://openf1.org) API.
 
+## Play it online
+
+**https://darrenchow.me/f1-strategy-desk/**, published from `public/` by GitHub Pages on every push to
+`main` once the tests pass (`.github/workflows/pages.yml`). The online version uses the built-in race engineer.
+
 ## Run it
 
 You need [Node.js](https://nodejs.org) 22.9 or newer.
