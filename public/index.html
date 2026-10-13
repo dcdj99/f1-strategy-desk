@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ferrari Strategy Desk</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="desk">
+    <section class="stage" aria-label="Race map">
+      <header class="masthead">
+        <h1>Fix Hamilton's race</h1>
+        <p class="sub">Singapore 2026, replayed from the real lap data. You make the pit calls.</p>
+      </header>
+
+      <div class="lapboard" aria-live="off">
+        <span class="lap-label">Lap</span>
+        <span id="lap-now" class="lap-now">0</span><span class="lap-total">/62</span>
+        <span id="vsc-flag" class="vsc-flag" hidden>VSC</span>
+      </div>
+
+      <div class="viewport">
+        <canvas id="track" aria-label="Track map with car positions"></canvas>
+      </div>
+
+      <div class="delta" id="delta" hidden>
+        <span id="delta-value" class="delta-value">0.0s</span>
+        <span id="delta-label" class="delta-label">vs Ferrari's call</span>
+      </div>
+
+      <div class="tyres" id="tyres" hidden>
+        <div class="tyre-row" data-who="you">
+          <span class="who">You</span>
+          <span class="compound" id="tyre-you-c"></span>
+          <span class="wear"><span class="wear-fill" id="tyre-you-w"></span></span>
+          <span class="age" id="tyre-you-a"></span>
+        </div>
+        <div class="tyre-row" data-who="real">
+          <span class="who">Ferrari</span>
+          <span class="compound" id="tyre-real-c"></span>
+          <span class="wear"><span class="wear-fill" id="tyre-real-w"></span></span>
+          <span class="age" id="tyre-real-a"></span>
+        </div>
+      </div>
+
+      <ol class="radio" id="radio" aria-live="polite"></ol>
+
+      <div class="finish" id="finish" hidden>
+        <div class="finish-card" role="dialog" aria-labelledby="finish-pos">
+          <p class="finish-kicker" id="finish-kicker">Chequered flag</p>
+          <p class="finish-pos" id="finish-pos"></p>
+          <p class="finish-compare" id="finish-compare"></p>
+          <h2 class="finish-headline" id="finish-headline"></h2>
+          <p class="finish-verdict" id="finish-verdict"></p>
+          <p class="finish-roast" id="finish-roast"></p>
+          <button class="btn primary" id="again">Try another strategy</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="tower" aria-label="Timing tower">
+      <ol id="tower-list"></ol>
+    </aside>
+
+    <section class="controls" aria-label="Strategy">
+      <div class="ruler-wrap">
+        <div class="ruler-head">
+          <p class="ruler-title">Your strategy</p>
+          <p class="ruler-hint">Drag the pit markers. Tap a stint to swap tyres.</p>
+        </div>
+        <div class="ruler" id="ruler"></div>
+        <div class="ruler-scale" id="ruler-scale"></div>
+        <p class="warn" id="warn" role="status"></p>
+      </div>
+      <div class="buttons">
+        <button class="btn" id="add-stop">Add stop</button>
+        <button class="btn" id="remove-stop">Remove stop</button>
+        <button class="btn" id="load-real">Load Ferrari's call</button>
+        <button class="btn primary" id="race">Race</button>
+      </div>
+      <div class="playback">
+        <button class="btn icon" id="pause" aria-label="Pause">Pause</button>
+        <label class="speed">Speed
+          <select id="speed">
+            <option value="30">30×</option>
+            <option value="60" selected>60×</option>
+            <option value="120">120×</option>
+            <option value="240">240×</option>
+          </select>
+        </label>
+      </div>
+    </section>
+  </main>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

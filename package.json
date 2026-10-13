@@ -1,0 +1,13 @@
+{
+  "name": "f1-strategy-desk",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "test": "node --test test/sim.test.mjs",
+    "data": "python.exe -B scripts/build_data.py public/data/race.json"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0"
+  }
+}
