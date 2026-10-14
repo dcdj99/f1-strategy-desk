@@ -31,7 +31,7 @@ Stop the server with Ctrl+C.
 1. **Plan your strategy.** The bar along the bottom is your race, lap 1 to 62, with Ferrari's real
    strategy shown underneath. It starts as a copy of Ferrari's call.
    - Pick your starting tyre (soft or medium).
-   - Click the bar to add a pit stop at that lap, or use **Add stop**. Up to three stops.
+   - Click or tap the bar to add a pit stop at that lap, or use **Add stop**. Up to three stops.
    - Drag a stop along the bar to move it, or use the arrows next to it in the pit sheet. With a stop
      selected, the arrow keys move it and Delete removes it; the × in the pit sheet removes it too.
    - Choose the tyre each stop fits. You must use both compounds or the ghost is disqualified.
@@ -52,6 +52,10 @@ Stop the server with Ctrl+C.
    - **Pause**, **Restart**, or **Change strategy** to go back to planning.
 3. **Read the finish card.** Your result against Ferrari's, how often each position came up over 200
    reruns with different passing luck, and the race engineer's debrief. **Try another strategy** to go again.
+
+On a phone, or a tablet held upright, the page is one column: the lap and your gap first, then the map,
+the radio and race control, the strategy bar and controls, and the standings. Drag sideways along the
+bar to move a stop or scrub the race; swipe up and down to scroll.
 
 ## Optional: Claude as race engineer
 

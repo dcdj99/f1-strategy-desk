@@ -114,12 +114,18 @@ button, select { font: inherit; color: inherit; }
 .wear-fill.cliff { background: var(--rosso); }
 .age { color: var(--flood-dim); font-variant-numeric: tabular-nums; }
 
-/* Team radio */
+/* Race control, then the team radio filling the rest of the column down to the bottom of the map. */
+.feed {
+  position: absolute; right: 1.5rem; top: 19.5rem; bottom: 1.25rem; width: var(--wall); z-index: 2;
+  display: flex; flex-direction: column; gap: 1rem;
+}
+
+/* Team radio: the newest call at the bottom; on a short screen the oldest give way (app.js). */
 .radio {
-  position: absolute; right: 1.5rem; bottom: 1.25rem; z-index: 2;
-  width: var(--wall); margin: 0; padding: 0; list-style: none;
+  flex: 1 1 0; min-height: 0; overflow: hidden; margin: 0; padding: 0; list-style: none;
   display: flex; flex-direction: column; gap: 0.5rem;
 }
+.radio li:first-child { margin-top: auto; }
 .radio li {
   background: rgba(8, 18, 39, 0.82); border-left: 3px solid var(--flood-dim);
   padding: 0.55rem 0.8rem; border-radius: 2px 6px 6px 2px;
@@ -292,27 +298,13 @@ button, select { font: inherit; color: inherit; }
 }
 .timeline.addable .ruler { cursor: copy; }
 
-@media (max-width: 900px) {
-  .desk { height: auto; grid-template-columns: minmax(0, 1fr); grid-template-rows: 70vh auto auto; grid-template-areas: "stage" "controls" "tower"; }
-  .controls { grid-template-columns: minmax(0, 1fr); padding-inline: 1rem; }
-  .pitsheet, .playback { padding-bottom: 0; justify-items: stretch; }
-  .stop { grid-template-columns: 3rem auto auto 2rem; gap: 0.35rem; }
-  .stop-note { grid-column: 2 / -1; margin-top: -0.3rem; }
-  .playback-actions { justify-content: flex-start; }
-  .stage { --wall: calc(100% - 3rem); }
-  .delta { top: auto; bottom: 9rem; }
-  .tyres { top: auto; bottom: 1.25rem; }
-  .radio { bottom: auto; top: 6.5rem; }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .vsc-flag, .radio li { animation: none; }
 }
 
 /* ---------- race control ticker (pit-wall column) ---------- */
 .ticker {
-  position: absolute; right: 1.5rem; top: 19.5rem; width: var(--wall); z-index: 2;
-  margin: 0; padding: 0; list-style: none; display: grid; gap: 0.25rem;
+  flex: none; margin: 0; padding: 0; list-style: none; display: grid; gap: 0.25rem;
   font-family: var(--display); font-size: 1.1rem;
 }
 .ticker li { display: grid; grid-template-columns: 3.4rem minmax(0, 1fr); gap: 0.5rem; color: var(--flood-dim); }
@@ -334,7 +326,7 @@ button, select { font: inherit; color: inherit; }
 .strip .seg.soft { background: rgba(229, 50, 43, 0.55); color: #fff; }
 .strip .seg.medium { background: rgba(255, 209, 46, 0.55); color: var(--bay-deep); }
 .lane { position: relative; height: 2.3rem; }
-.lane span {
+.lane > span {
   position: absolute; top: 0.15rem; transform: translateX(-50%); white-space: nowrap;
   font-family: var(--display); font-size: 0.85rem; font-weight: 600; color: var(--flood-dim);
 }
@@ -355,5 +347,92 @@ button, select { font: inherit; color: inherit; }
   background: var(--ghost); color: var(--bay-deep); font-family: var(--display); font-weight: 700;
   font-size: 1rem; padding: 0 0.4rem; border-radius: 2px; white-space: nowrap;
 }
+.playhead.at-start span { transform: none; }
+.playhead.at-end span { left: 2px; transform: translateX(-100%); }
 .timeline.scrubbable { cursor: col-resize; }
 .timeline.scrubbable .stint, .timeline.scrubbable .pit { cursor: col-resize; }
+
+/* ---------- phones and tablets ---------- */
+/* One column: the stage stops layering things over the map. Lap and gap first, the map full width,
+   then the pit wall, the strategy, and the standings. */
+@media (max-width: 900px) {
+  .desk {
+    height: auto; min-height: 100vh;
+    grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto;
+    grid-template-areas: "stage" "controls" "tower";
+  }
+
+  .stage { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0.75rem 1rem; padding: 1rem 1rem 1.25rem; overflow: visible; }
+  .masthead, .lapboard, .delta, .tyres { position: static; width: auto; }
+  .feed { display: contents; }
+  /* The title and the lap fill the first line; the gap and tyres start the next. */
+  .masthead { order: 1; flex: 1 1 calc(100% - 14rem); min-width: 0; }
+  .masthead h1 { font-size: 2rem; }
+  .masthead .sub { font-size: 0.95rem; max-width: 34ch; }
+  .desk[data-mode="race"] .masthead .sub { display: none; }
+  .lapboard { order: 2; flex: none; }
+  .lap-label { font-size: 1rem; }
+  .lap-now { font-size: 2.4rem; }
+  .lap-total { font-size: 1.2rem; }
+  .vsc-flag { margin-left: 0.4rem; font-size: 1.1rem; }
+
+  .delta { order: 3; flex: 1 1 100%; flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 0.6rem; }
+  .delta-value { font-size: 3.25rem; }
+  .delta-label { font-size: 1.15rem; }
+  .tyres { order: 4; flex: 1 1 100%; font-size: 1.1rem; }
+  .tyre-row { grid-template-columns: 4.75rem 1.6rem minmax(0, 1fr) 3.75rem; }
+
+  /* The map runs edge to edge; its height doesn't follow the phone's toolbar. */
+  .viewport {
+    order: 5; position: relative; inset: auto; flex: 0 0 calc(100% + 2rem); margin-inline: -1rem;
+    aspect-ratio: 5 / 4; max-height: 62vh; max-height: 62svh;
+  }
+
+  .radio { order: 6; flex: 1 1 100%; min-height: auto; overflow: visible; }
+  .radio li:first-child { margin-top: 0; }
+  .radio li:nth-last-child(n + 3) { display: none; }
+  .ticker { order: 7; flex: 1 1 100%; }
+
+  /* The flag covers the screen, not just the map, and scrolls if it has to. */
+  .finish { position: fixed; z-index: 20; overflow-y: auto; padding: 1rem; }
+  .finish-card { width: min(34rem, 100%); padding: 1.25rem; }
+  .finish-pos { font-size: 4.5rem; }
+  .odds-bars li { width: auto; flex: 1 1 0; max-width: 3rem; }
+
+  .controls { grid-template-columns: minmax(0, 1fr); gap: 1rem; padding: 1rem 1rem 1.25rem; }
+  .timeline { touch-action: pan-y; }
+  .pitsheet, .playback { padding-bottom: 0; justify-items: stretch; }
+  .stop { grid-template-columns: 3rem auto auto 2.4rem; gap: 0.35rem; }
+  .stop-note { grid-column: 2 / -1; margin-top: -0.3rem; }
+  .sheet-actions .primary { flex: 1 1 100%; margin-left: 0; padding-block: 0.7rem; }
+  .speeds { display: flex; }
+  .speeds button { flex: 1 1 0; padding-block: 0.6rem; }
+  .playback-actions { justify-content: flex-start; }
+
+  /* Standings in columns rather than one long list. */
+  .tower { border-left: 0; border-top: 1px solid var(--bay-line); padding: 1rem; }
+  .tower ol { display: block; columns: 3; column-gap: 1.5rem; }
+  .tower li { break-inside: avoid; margin-bottom: 2px; }
+}
+
+/* Tablets: the gap beside the tyres, the radio beside race control. */
+@media (min-width: 600px) and (max-width: 900px) {
+  .delta { flex: 1 1 0; }
+  .tyres { flex: 0 1 22rem; align-self: center; }
+  .viewport { aspect-ratio: 4 / 3; }
+  .radio { flex: 3 1 0; }
+  .ticker { flex: 2 1 0; }
+}
+
+/* Phones */
+@media (max-width: 599px) {
+  .tower ol { columns: 2; column-gap: 1rem; }
+  .lane .more { display: none; }
+}
+
+/* Fingers: bigger handles on the bar and the lap buttons. */
+@media (pointer: coarse) {
+  .ruler .pit { width: 2.4rem; margin-left: -1.2rem; }
+  .nudge { width: 2.4rem; height: 2.4rem; }
+  .chip { padding-block: 0.45rem; }
+}

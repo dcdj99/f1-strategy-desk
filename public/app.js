@@ -82,6 +82,9 @@ const canvas = $("track");
 const ctx = canvas.getContext("2d");
 const trackLayer = document.createElement("canvas");
 let geo = null;
+// Phones and tablets (style.css): one column, nothing laid over the map.
+const NARROW = matchMedia("(max-width: 900px)");
+const TAP = matchMedia("(pointer: coarse)").matches ? "Tap" : "Click";
 
 function layout() {
   const dpr = window.devicePixelRatio || 1;
@@ -92,9 +95,12 @@ function layout() {
   trackLayer.height = canvas.height;
 
   const pts = race.track.map(([f, x, y]) => [f, x, -y]);
-  // Leave the right-hand pit-wall column (gap, tyres, ticker, radio) clear on wide screens.
-  const wall = r.width > 900 ? 22 * 16 + 48 : 30;
-  const pad = { top: 130 * dpr, bottom: 40 * dpr, left: 40 * dpr, right: wall * dpr };
+  // Leave the masthead and the right-hand pit-wall column (gap, tyres, ticker, radio) clear on wide
+  // screens. On narrow ones they sit around the map, so it only needs room for labels.
+  const wall = NARROW.matches ? 14 : 22 * 16 + 48;
+  const pad = NARROW.matches
+    ? { top: 28 * dpr, bottom: 14 * dpr, left: 14 * dpr, right: wall * dpr }
+    : { top: 130 * dpr, bottom: 40 * dpr, left: 40 * dpr, right: wall * dpr };
   const W = canvas.width - pad.left - pad.right;
   const H = canvas.height - pad.top - pad.bottom;
   let best = null;
@@ -312,10 +318,10 @@ function render() {
     const call = calls.find((c) => c.num === d.num);
     if (call) {
       drawCallout(x, y);
-      callLabels.push({ x, y, text: `${d.code} ${call.what}` });
+      callLabels.push({ x, y, text: `${d.code} ${call.what}`, up: -20, size: 14 });
     }
     if (waiting !== null) pitLaneStart.push({ p, x, y, code: d.code });
-    else if (state.running && pit && !stopped && !call) drawLabel(x, y, `${d.code} pit`, "#ffb547", -14, 13);
+    else if (state.running && pit && !stopped && !call) callLabels.push({ x, y, text: `${d.code} pit`, up: -14, size: 13 });
     if (stopped) continue;
     if (!leader || p > leader.p) leader = { p, x, y, code: d.code };
     if (gp !== null && !done) {
@@ -330,10 +336,11 @@ function render() {
     placed.push(n);
     drawLabel(n.x, n.y, text, color, 22, size);
   };
-  // What just happened to a car: above it, or below it when you and Hamilton are labelled close by.
+  // What just happened to a car, or that it's in the pit lane: above it, or below it where it would
+  // run into your label or Hamilton's ("You (stacked behind LEC)" reaches 80px either side).
   for (const c of callLabels) {
-    const nearUs = [[rx, ry], [gx, gy]].some(([qx, qy]) => Math.hypot(qx - c.x, qy - c.y) < 40 * geo.dpr);
-    drawLabel(c.x, c.y, c.text, "#ffb547", nearUs ? 24 : -20, 14);
+    const nearUs = [[rx, ry], [gx, gy]].some(([qx, qy]) => Math.abs(qx - c.x) < 110 * geo.dpr && Math.abs(qy - c.y) < 36 * geo.dpr);
+    drawLabel(c.x, c.y, c.text, "#ffb547", nearUs ? 24 : c.up, c.size);
     placed.push(c);
   }
   if (pitLaneStart.length) {
@@ -495,10 +502,14 @@ function shortEvent(text) {
 }
 
 function renderRadio() {
+  const list = $("radio");
   const shown = state.radio.filter((m) => m.shown).slice(-3);
-  $("radio").innerHTML = shown.map((m) =>
+  list.innerHTML = shown.map((m) =>
     `<li class="${m.from}"><span class="from">${m.from === "engineer" ? "Pit wall" : "Car 44"}, ${m.lap > TOTAL ? "flag" : `lap ${m.lap}`}</span>${escapeHtml(m.text)}</li>`,
   ).join("");
+  // A short screen has room for fewer calls: the oldest give way rather than get cut off.
+  // (The newest slides up 6px as it arrives.)
+  while (list.children.length > 1 && list.scrollHeight > list.clientHeight + 6) list.firstElementChild.remove();
 }
 
 function escapeHtml(s) {
@@ -543,12 +554,12 @@ function renderRuler() {
   $("add-stop").disabled = st.length >= MAX_STINTS;
 
   // Planning shows the pit sheet; racing shows the replay controls.
-  $("controls").dataset.mode = state.running ? "race" : "plan";
+  $("controls").dataset.mode = document.querySelector(".desk").dataset.mode = state.running ? "race" : "plan";
   $("pitsheet").hidden = state.running;
   $("playback").hidden = !state.running;
   $("ruler-hint").textContent = state.running
     ? "Drag along the timeline to jump to any lap."
-    : st.length >= MAX_STINTS ? "Drag a stop to move it. Three stops is the limit." : "Click the bar to add a stop. Drag a stop to move it.";
+    : st.length >= MAX_STINTS ? "Drag a stop to move it. Three stops is the limit." : `${TAP} the bar to add a stop. Drag a stop to move it.`;
   tl.classList.toggle("scrubbable", state.running);
   tl.classList.toggle("addable", !state.running && st.length < MAX_STINTS);
   if (state.running) $("add-hint").hidden = true;
@@ -599,7 +610,8 @@ function renderEventLane() {
   $("event-lane").innerHTML = timelineMarks(race, barLaps).map((m) =>
     m.kind === "vsc" ? `<span class="vsc-tag row1" style="left:${x(m.at)}" title="VSC deployed">VSC</span>`
     : m.kind === "out" ? `<span class="out row2" style="left:${x(m.at)}" title="${escapeHtml(m.text)}">✕ ${escapeHtml(driverByNum[m.driver]?.code || "")}</span>`
-    : `<span class="incident row2" style="left:${x(m.at)}" title="${escapeHtml(m.text)}">! ${escapeHtml(m.text.replace("Turn ", "T"))}</span>`).join("");
+    : `<span class="incident row2" style="left:${x(m.at)}" title="${escapeHtml(m.text)}">! ${escapeHtml(driverByNum[m.driver]?.code || "")}` +
+      `<span class="more"> ${escapeHtml(m.what.replace("Turn ", "T"))}</span></span>`).join("");
 }
 
 function renderStaticTimeline() {
@@ -619,6 +631,9 @@ function updatePlayhead() {
   fut.hidden = false;
   ph.style.left = x;
   fut.style.left = x;
+  // At either end of the bar the label sits inside it rather than centred over the edge.
+  ph.classList.toggle("at-start", laps / TOTAL < 0.04);
+  ph.classList.toggle("at-end", laps / TOTAL > 0.96);
   $("playhead-label").textContent = laps >= TOTAL ? "Flag" : `Lap ${Math.floor(laps) + 1}`;
   for (const pit of ruler.querySelectorAll(".pit")) {
     const at = state.stints[+pit.dataset.i].from - 1;
@@ -711,21 +726,28 @@ tl.addEventListener("pointerdown", (e) => {
       state.playing = wasPlaying && !state.finished;
       tl.removeEventListener("pointermove", move);
       tl.removeEventListener("pointerup", up);
+      tl.removeEventListener("pointercancel", up);
     };
     tl.addEventListener("pointermove", move);
     tl.addEventListener("pointerup", up);
+    tl.addEventListener("pointercancel", up);
     return;
   }
   const b = e.target.closest(".pit");
   if (!b) return;
   const i = +b.dataset.i;
-  b.setPointerCapture(e.pointerId);
+  // Every move redraws the bar, stop markers included, so the timeline holds the drag, not the marker.
+  tl.setPointerCapture(e.pointerId);
   dragging = true;
   $("add-hint").hidden = true;
   const move = (ev) => movePit(i, Math.round(lapsAt(ev)) + 1);
-  const up = () => { dragging = false; b.removeEventListener("pointermove", move); b.removeEventListener("pointerup", up); };
-  b.addEventListener("pointermove", move);
-  b.addEventListener("pointerup", up);
+  const up = () => {
+    dragging = false;
+    tl.removeEventListener("pointermove", move); tl.removeEventListener("pointerup", up); tl.removeEventListener("pointercancel", up);
+  };
+  tl.addEventListener("pointermove", move);
+  tl.addEventListener("pointerup", up);
+  tl.addEventListener("pointercancel", up);
 });
 
 ruler.addEventListener("keydown", (e) => {
@@ -933,7 +955,19 @@ $("speeds").addEventListener("click", (e) => {
 });
 
 // ---------------------------------------------------------------- boot
-window.addEventListener("resize", () => { layout(); render(); });
+// Refit the map when its box changes size, and only then: a resized window or a turned phone, the
+// controls changing height between planning and racing, but not a phone's toolbar sliding away.
+let mapSize = "";
+new ResizeObserver(() => {
+  const r = canvas.getBoundingClientRect();
+  const size = `${r.width}x${r.height}@${window.devicePixelRatio}`;
+  if (size === mapSize) return;
+  mapSize = size;
+  layout();
+  render();
+  renderRadio();
+}).observe(canvas);
+NARROW.addEventListener("change", () => { mapSize = ""; layout(); render(); });
 document.fonts?.ready.then(() => render());
 layout();
 renderRuler();
