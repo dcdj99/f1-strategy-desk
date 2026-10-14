@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { simulateGhost, realStrategy, realProgress, ghostProgress, pitLoss, progressAt, inWindow, HAM } from "../public/sim.js";
+import { simulateGhost, realStrategy, realProgress, ghostProgress, pitLoss, progressAt, inWindow, stackedBehind, HAM } from "../public/sim.js";
 import { buildSummary, builtInRadio } from "../public/engineer.js";
 import { vscPeriods, outAt, raceMoments, timelineMarks } from "../public/moments.js";
 
@@ -19,6 +19,7 @@ const PLANS = {
   "box lap 38, just before the VSC": plan("M1,S39"),
   "VSC two-stop": [...realStrategy(race), { compound: "SOFT", from: 40, ageAtStart: 0 }],
   "box lap 60": plan("M1,S61"),
+  "box lap 24, stacked behind Leclerc": plan("S1,M25"),
 };
 const VSCS = vscPeriods(race);
 const inVsc = (t) => VSCS.some(([a, z]) => a <= t && t <= z);
@@ -47,6 +48,8 @@ test("every radio call plays just after what it talks about", () => {
         assert.ok(last && m.t >= last[1], `${where}: should come after leaving the pit lane`);
       } else if (m.key === "vsc_stay_out") {
         assert.ok(!wins.some(([a, z]) => VSCS.some(([va, vz]) => a <= vz && z >= va && va <= m.t && m.t <= vz)), `${where}: pitting under this VSC`);
+      } else if (m.key === "stacked") {
+        assert.ok(stackedBehind(ghost, m.t), `${where}: not waiting at the box then`);
       } else if (m.key === "car_out") {
         assert.ok(events("out").some((e) => e.t < m.t && m.t - e.t < 30), `${where}: no car had just stopped`);
       } else if (m.key === "t1_you" || m.key === "ferrari_off") {

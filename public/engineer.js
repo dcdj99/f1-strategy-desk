@@ -249,6 +249,9 @@ export function builtInRadio(race, ghost, summary, bank, stints) {
     const vsc = vscs.find(([a, z]) => a <= pitIn && pitIn <= z);
     if (loss < green - 0.5 && vsc) say(Math.max(vsc[0] + 1, Math.min(Math.max(vsc[0] + 3, ghostLapTime(ghost, p, 0) + 2), pitIn - 2)), p, "box_vsc", slots, 0);
     else say(Math.min(ghostLapTime(ghost, Math.max(1, p - 1), 0.6), pitIn - 20), Math.max(1, p - 1), p <= 14 ? "box_early" : p >= 45 ? "box_late" : "box_next_lap", slots, 0);
+    // Double stack: Leclerc is in the box as we pull up.
+    const w = ghost.pitWaits?.[k];
+    if (w?.wait >= 1) say(ghost.bounds[p - 1][1] + ghost.pitRef.box - 0.5, p + 1, "stacked", { car: names[byCode[w.behind]], wait: w.wait.toFixed(0) }, 1);
     if (p + 1 > TOTAL) return;
     const ahead = carJustAhead(race, ghost, p + 1, 2.0);
     if (ahead) say(pitOut + 3, p + 1, "out_lap_traffic", { car: names[ahead] }, 2);

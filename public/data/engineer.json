@@ -98,6 +98,14 @@
         "Understood. Car feels alive on these."
       ]
     },
+    "stacked": {
+      "from": "engineer",
+      "lines": [
+        "Double stack, {car} is still in the box. Hold, hold.",
+        "Stacked behind {car}. About {wait}s, then you're in.",
+        "{car} first, then you. About {wait}s waiting, sorry."
+      ]
+    },
     "stuck_driver": {
       "from": "driver",
       "lines": [

@@ -18,6 +18,8 @@ for (const p1 of [8, 14, 20, 26]) for (const p2 of [39, 44, 50]) for (const c of
 }
 PLANS.push([stint(S, 1), stint(M, 13), stint(S, 29), stint(S, 46)]);
 PLANS.push([stint(S, 1), stint(S, 30)]);
+// Boxing on lap 24 just behind Leclerc: a double stack.
+PLANS.push([stint(S, 1), stint(M, 25)]);
 
 const races = PLANS.map((st) => {
   const ghost = simulateGhost(race, st);
@@ -33,7 +35,7 @@ const races = PLANS.map((st) => {
 const slotsIn = (text) => [...text.matchAll(/\{(\w+)\}/g)].map((m) => m[1]);
 
 test("every line uses only slots the engineer fills, and radio calls stay short", () => {
-  const radioSlots = new Set(["car", "tyres", "Tyres", "laps", "loss", "green", "pct", "gap", "pos", "realPos"]);
+  const radioSlots = new Set(["car", "tyres", "Tyres", "laps", "loss", "green", "pct", "gap", "pos", "realPos", "wait"]);
   const debriefSlots = new Set(["pos", "realPos", "gap", "green", "stops", "ferrariStops", "extra", "laps", "lap", "saved", "loss", "car", "usual", "usualPct"]);
   for (const [key, group] of Object.entries(bank.radio)) {
     assert.ok(["engineer", "driver"].includes(group.from), key);

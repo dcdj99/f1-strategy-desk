@@ -1,6 +1,6 @@
 import {
   HAM, simulateGhost, realStrategy, validateStrategy, progressAt, classify, tyreAt, tyreModelLap,
-  realProgress, ghostProgress, timeAtGhostLaps, raceOdds, pitLoss, inWindow,
+  realProgress, ghostProgress, timeAtGhostLaps, raceOdds, pitLoss, inWindow, stackedBehind,
 } from "./sim.js";
 import { buildSummary, builtInRadio, builtInDebrief, timeLapRadio, stintSpans as spans } from "./engineer.js";
 import { outAt, raceMoments, timelineMarks } from "./moments.js";
@@ -358,7 +358,8 @@ function render() {
     if (youToo) drawCallout(gx, gy);
     const info = state.running && t < state.ghost.finish ? state.ghost.traffic[Math.floor(progressAt(state.ghost.bounds, t))] : null;
     const stuck = info?.held ? `You (stuck behind ${info.held}${info.chance ? `, ${Math.round(info.chance * 100)}% a lap to pass` : ""})` : null;
-    const youLabel = ghostPit ? "You (pit)" : youToo ? `You ${hamCall.what}` : stuck || "You";
+    const stack = ghostPit ? stackedBehind(state.ghost, t) : null;
+    const youLabel = stack ? `You (stacked behind ${stack})` : ghostPit ? "You (pit)" : youToo ? `You ${hamCall.what}` : stuck || "You";
     if (Math.hypot(gx - rx, gy - ry) < 40 * geo.dpr) {
       drawLabel((gx + rx) / 2, Math.min(gy, ry), youToo && !ghostPit && !realPit ? `You + Hamilton ${hamCall.what}` : `${youLabel} + ${realLabel}`, "#f3eedd");
     } else {

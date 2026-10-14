@@ -100,6 +100,12 @@ elsewhere. Run the tests with `npm test`.
   the car is back out before it's deployed, and a lap later it has ended.
   Within each lap it borrows the real car's motion, so it slows where he slowed. Every stop, green or VSC,
   drives Hamilton's real 33s run down the pit lane, standstill included, lined up on the timing line.
+- Ferrari double-stacks. Both cars use the same box, about 5.5s past the timing line. If the ghost gets
+  there while Leclerc is in it, it waits a second short of the box until he has moved off, plus 2s for
+  him to roll out and the ghost to roll in, then gets its normal stop. The wait goes on the out-lap, the map
+  shows "You (stacked behind LEC)" and the pit wall says so. The 2s is an assumption: no team
+  double-stacked in this race to measure it. Boxing on lap 24 off a soft start, the ghost arrives 1.6s
+  after Leclerc and waits 3.6s.
 - Traffic follows the ghost. While it is within 0.5s of where Hamilton really was, it gets his real lap,
   including whoever he was stuck behind and whoever he passed. Anywhere else it runs his clean-air pace
   into the real cars at that spot.
@@ -132,7 +138,8 @@ elsewhere. Run the tests with `npm test`.
   talk before the VSC is out, no pass call before the map shows the pass), that a stop is priced as
   under the VSC only when the ghost comes in with it out, that retired cars stop where the feed shows,
   that each incident is placed when it happened, and that the ticker, map, tower and marks under the bar
-  agree on when each thing happened.
+  agree on when each thing happened, and that a ghost reaching the box while Leclerc is in it waits until
+  he has gone.
 - The race engineer is built in. `public/data/engineer.json` holds pre-written radio and debrief lines for
   every situation the replay produces: the start, pit calls (normal, early, late, under the VSC), where a
   stop rejoins, staying out under the VSC, being stuck behind a car with the odds of getting by, passes
@@ -151,6 +158,8 @@ elsewhere. Run the tests with `npm test`.
 - Pace advantage in the passing fit is each car's clean-air pace nearby, which is noisy when a car spends
   long spells in traffic.
 - Every ghost stop is Hamilton's one real stop replayed: the same time in the pit lane and in the box.
+- Leclerc's stops are his real ones. If the ghost reaches the box first it goes first, and Leclerc still
+  stops when he really did, even if the ghost hasn't left yet.
   The pit cost in the strategy comes from all the real stops, so a slow or quick stop doesn't change it.
 - Hard tyres weren't raced, so only softs and mediums are offered.
 - Opus tags its radio by lap, not by moment. Each Opus line takes the time of the built-in line on the

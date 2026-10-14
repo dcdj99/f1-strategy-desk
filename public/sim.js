@@ -52,6 +52,25 @@ export function pitLoss(race, lap) {
 
 const pitLapsOf = (stints) => stints.slice(1).map((s) => s.from - 1);
 
+// From a car moving off its pit box to the next car stopping in it: one rolls out, the other rolls in.
+export const BOX_CLEAR = 2;
+
+// When a car stood still in its pit box at each stop, [from, to] in race seconds: under about 1 m/s
+// in the position feed while in the pit lane.
+const boxCache = new WeakMap();
+export function boxStops(race, num) {
+  let byCar = boxCache.get(race);
+  if (!byCar) boxCache.set(race, (byCar = {}));
+  byCar[num] ??= (race.pit_windows?.[String(num)] || []).map(([a, z]) => {
+    let s0 = null, s1 = null;
+    for (let t = Math.max(a, 0); t < z; t += 0.05) {
+      if (realProgress(race, num, t + 0.05) - realProgress(race, num, t) < 1e-5) { s0 ??= t; s1 = t + 0.05; }
+    }
+    return s0 === null ? null : [s0, s1];
+  }).filter(Boolean);
+  return byCar[num];
+}
+
 // Traffic rules for when the ghost is somewhere Hamilton wasn't.
 export const TRAFFIC = {
   sameSpot: 0.5,    // within this many seconds of the real car: it gets Hamilton's real lap, traffic and all
@@ -150,6 +169,14 @@ export function simulateGhost(race, stints, { seed = 1 } = {}) {
     realOut[p] = realLaps[p] - modelReal(p + 1);
   }
   const p0 = realPits[0];
+  // Double stacking: the ghost shares the Ferrari box with Leclerc. Hamilton's real stop says how long
+  // after crossing the timing line (which the pit lane crosses) a car reaches the box.
+  const team = race.drivers.find((d) => d.num === HAM)?.team;
+  const mates = race.drivers.filter((d) => d.team === team && d.num !== HAM)
+    .flatMap((d) => boxStops(race, d.num).map(([a, z]) => ({ code: d.code, a, z })));
+  const hamBox = p0 ? boxStops(race, HAM)[0] : null;
+  const boxAfterLine = hamBox ? hamBox[0] - realB[p0 - 1][1] : null;
+  const pitWaits = [];
   const inShare = p0 ? realIn[p0] / (realIn[p0] + realOut[p0]) : 0.35;
 
   const laps = [], tyres = [], profile = [], bounds = [], traffic = [];
@@ -162,6 +189,15 @@ export function simulateGhost(race, stints, { seed = 1 } = {}) {
     let pit = 0;
     if (pitLaps.includes(lap)) pit += realPits.includes(lap) ? realIn[lap] : inShare * pitLoss(race, lap);
     if (pitLaps.includes(lap - 1)) pit += realPits.includes(lap - 1) ? realOut[lap - 1] : (1 - inShare) * pitLoss(race, lap - 1);
+    if (pitLaps.includes(lap - 1) && boxAfterLine !== null) {
+      // Leclerc got to the box first: wait just short of it until he has gone. If the ghost gets there
+      // first it goes first (his real stop can't move).
+      const arrive = t + boxAfterLine;
+      const m = mates.find(({ a, z }) => a <= arrive && arrive < z + BOX_CLEAR);
+      const wait = m ? m.z + BOX_CLEAR - arrive : 0;
+      pitWaits.push(m ? { wait, behind: m.code } : { wait: 0, behind: null });
+      pit += wait;
+    }
 
     const offset = t - realB[lap - 1][0];
     const copying = Math.abs(offset) < TRAFFIC.sameSpot;
@@ -231,11 +267,12 @@ export function simulateGhost(race, stints, { seed = 1 } = {}) {
       line,
       fin: realProgress(race, HAM, realWin[0]) - (p0 - 1), // how far round the in-lap the pit lane starts
       fout: realProgress(race, HAM, realWin[1]) - p0,      // how far round the out-lap it ends
+      box: boxAfterLine ?? 0,                              // seconds from the line to stopping in the box
     };
-    pitWindows = pitLaps.map((p) => [bounds[p - 1][1] - (line - realWin[0]), bounds[p - 1][1] + (realWin[1] - line)]);
+    pitWindows = pitLaps.map((p, k) => [bounds[p - 1][1] - (line - realWin[0]), bounds[p - 1][1] + (realWin[1] - line) + (pitWaits[k]?.wait || 0)]);
   }
   const start = realB[0][0];
-  return { laps, tyres, bounds, pitLaps, profile, traffic, pitRef, pitWindows, finish: t, total: t - start };
+  return { laps, tyres, bounds, pitLaps, profile, traffic, pitRef, pitWindows, pitWaits, finish: t, total: t - start };
 }
 
 // When the real Hamilton reached `laps` of progress, searching within one of his laps.
@@ -248,6 +285,15 @@ function realTimeAt(race, laps, [lo, hi]) {
 }
 
 // Whether race time t falls in any of these [start, end] windows.
+// Who the ghost is waiting behind at the box at race time t (a double stack), or null.
+export function stackedBehind(ghost, t) {
+  for (const [k, w] of (ghost.pitWaits || []).entries()) {
+    const from = ghost.bounds[ghost.pitLaps[k] - 1][1] + ghost.pitRef.box - 1;
+    if (w.wait > 0 && t >= from && t < from + w.wait) return w.behind;
+  }
+  return null;
+}
+
 export function inWindow(windows, t) {
   return !!windows?.some(([a, z]) => t >= a && t < z);
 }
@@ -292,7 +338,11 @@ export function ghostProgress(race, ghost, t) {
     const k = ghost.pitWindows.findIndex(([a, z]) => t >= a && t < z);
     if (k >= 0) {
       const p = ghost.pitLaps[k];
-      return p + realProgress(race, HAM, ref.line + (t - b[p - 1][1])) - ref.lap;
+      let u = t - b[p - 1][1];
+      // Stacked behind Leclerc: held a second short of the box until he has gone, then in.
+      const w = ghost.pitWaits?.[k]?.wait || 0;
+      if (w > 0 && u > ref.box - 1) u = Math.max(ref.box - 1, u - w);
+      return p + realProgress(race, HAM, ref.line + u) - ref.lap;
     }
   }
   let i = 0;

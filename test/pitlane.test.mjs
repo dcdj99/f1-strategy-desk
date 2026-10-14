@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { simulateGhost, realProgress, ghostProgress, HAM } from "../public/sim.js";
+import { simulateGhost, realProgress, ghostProgress, boxStops, BOX_CLEAR, HAM } from "../public/sim.js";
 
 const race = JSON.parse(readFileSync(new URL("../public/data/race.json", import.meta.url), "utf8"));
 const LAP_M = 4940; // Marina Bay lap length, metres
@@ -138,4 +138,40 @@ test("smoothed positions move steadily", () => {
   }
   console.log(`mean change in speed ${(sum / count).toFixed(2)} thousandths of a lap per second`);
   assert.ok(sum / count < 0.5);
+});
+
+test("a double stack: a ghost that reaches the box while Leclerc is in it waits until he has gone", () => {
+  const team = race.drivers.find((d) => d.num === HAM).team;
+  const mate = race.drivers.find((d) => d.team === team && d.num !== HAM);
+  const theirs = boxStops(race, mate.num);
+  assert.ok(theirs.length >= 1, `${mate.code} never stood in the box`);
+  const realLine = race.timelines[String(HAM)][race.pits[String(HAM)][0] - 1][1];
+  const real = standstill((t) => realProgress(race, HAM, t), realLine);
+  const specs = [];
+  for (let p = 18; p <= 42; p++) specs.push(`M1,S${p + 1}`, `S1,M${p + 1}`);
+  for (const p1 of [8, 14, 20]) for (const p2 of [24, 39]) specs.push(`M1,S${p1 + 1},S${p2 + 1}`, `S1,M${p1 + 1},S${p2 + 1}`);
+  let stacked = 0;
+  for (const spec of specs) {
+    const g = simulateGhost(race, plan(spec));
+    g.pitLaps.forEach((p, k) => {
+      const line = g.bounds[p - 1][1];
+      const would = line + g.pitRef.box; // reaching the box with nobody in it
+      // When the ghost reaches the box, from its motion on the map.
+      const boxAt = p + realProgress(race, HAM, g.pitRef.line + g.pitRef.box) - g.pitRef.lap;
+      let reach = null;
+      for (let t = line; t < line + 60 && reach === null; t += 0.05) if (ghostProgress(race, g, t) >= boxAt - 1e-6) reach = t;
+      const first = theirs.find(([a, z]) => a <= would && would < z + BOX_CLEAR);
+      const where = `${spec}, box at the end of lap ${p}`;
+      if (first) {
+        stacked++;
+        assert.ok(reach >= first[1] + BOX_CLEAR - 0.1, `${where}: in the box at ${reach.toFixed(2)}s, ${mate.code} left at ${first[1].toFixed(2)}s`);
+      } else {
+        assert.equal(g.pitWaits[k].wait, 0, `${where}: waited with nobody in the box`);
+      }
+      const still = standstill((t) => ghostProgress(race, g, t), line);
+      assert.ok(Math.abs(still - (real + g.pitWaits[k].wait)) < 0.5, `${where}: stands still ${still.toFixed(1)}s, waited ${g.pitWaits[k].wait.toFixed(1)}s`);
+      if (first) console.log(`${where}: reaches the box ${(would - first[0]).toFixed(1)}s after ${mate.code}, waits ${g.pitWaits[k].wait.toFixed(1)}s`);
+    });
+  }
+  assert.ok(stacked >= 2, `only ${stacked} double stacks`);
 });
