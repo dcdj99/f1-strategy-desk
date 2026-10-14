@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { simulateGhost, realProgress, ghostProgress, boxStops, BOX_CLEAR, HAM } from "../public/sim.js";
+import { simulateGhost, realProgress, ghostProgress, boxStops, boxStill, BOX_CLEAR, HAM } from "../public/sim.js";
 
 const race = JSON.parse(readFileSync(new URL("../public/data/race.json", import.meta.url), "utf8"));
 const LAP_M = 4940; // Marina Bay lap length, metres
@@ -140,10 +140,25 @@ test("smoothed positions move steadily", () => {
   assert.ok(sum / count < 0.5);
 });
 
+test("the speed trace and the position feed find the same Ferrari box stops", () => {
+  const team = race.drivers.find((d) => d.num === HAM).team;
+  for (const d of race.drivers.filter((x) => x.team === team)) {
+    const speed = race.box_stops[String(d.num)], pos = boxStops(race, d.num);
+    assert.equal(speed.length, pos.length, `${d.code}: ${JSON.stringify(speed)} on the speed trace`);
+    speed.forEach(([a, z], k) => {
+      const [pa, pz] = pos[k];
+      const where = `${d.code} stop ${k + 1}: at 0 km/h ${a.toFixed(2)}-${z.toFixed(2)}s, still on the map ${pa.toFixed(2)}-${pz.toFixed(2)}s`;
+      console.log(where);
+      assert.ok(Math.abs(a - pa) < 1 && Math.abs(z - pz) < 1, where);
+      assert.ok(z - a > 1 && z - a < 6, where);
+    });
+  }
+});
+
 test("a double stack: a ghost that reaches the box while Leclerc is in it waits until he has gone", () => {
   const team = race.drivers.find((d) => d.num === HAM).team;
   const mate = race.drivers.find((d) => d.team === team && d.num !== HAM);
-  const theirs = boxStops(race, mate.num);
+  const theirs = boxStill(race, mate.num);
   assert.ok(theirs.length >= 1, `${mate.code} never stood in the box`);
   const realLine = race.timelines[String(HAM)][race.pits[String(HAM)][0] - 1][1];
   const real = standstill((t) => realProgress(race, HAM, t), realLine);
@@ -155,16 +170,18 @@ test("a double stack: a ghost that reaches the box while Leclerc is in it waits 
     const g = simulateGhost(race, plan(spec));
     g.pitLaps.forEach((p, k) => {
       const line = g.bounds[p - 1][1];
-      const would = line + g.pitRef.box; // reaching the box with nobody in it
+      const would = line + g.pitRef.still; // stopping in the box with nobody in it, on the speed trace
       // When the ghost reaches the box, from its motion on the map.
       const boxAt = p + realProgress(race, HAM, g.pitRef.line + g.pitRef.box) - g.pitRef.lap;
       let reach = null;
       for (let t = line; t < line + 60 && reach === null; t += 0.05) if (ghostProgress(race, g, t) >= boxAt - 1e-6) reach = t;
+      // On the speed trace, where the stack is timed, Hamilton's stop starts this much later.
+      const reachStill = reach + g.pitRef.still - g.pitRef.box;
       const first = theirs.find(([a, z]) => a <= would && would < z + BOX_CLEAR);
       const where = `${spec}, box at the end of lap ${p}`;
       if (first) {
         stacked++;
-        assert.ok(reach >= first[1] + BOX_CLEAR - 0.1, `${where}: in the box at ${reach.toFixed(2)}s, ${mate.code} left at ${first[1].toFixed(2)}s`);
+        assert.ok(Math.abs(reachStill - (first[1] + BOX_CLEAR)) < 0.1, `${where}: stops in the box at ${reachStill.toFixed(2)}s, ${mate.code} left at ${first[1].toFixed(2)}s`);
       } else {
         assert.equal(g.pitWaits[k].wait, 0, `${where}: waited with nobody in the box`);
       }

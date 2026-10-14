@@ -590,6 +590,36 @@ def main(out_path):
         print("  #%d pit laps %s, in the pit lane %s" % (dn, pit_laps.get(dn, []),
               ", ".join("%.0f-%.0fs (%.0fs)" % (a, b, b - a) for a, b in wins)))
 
+    # --- standing in the box, from the speed trace ---------------------------------
+    # The position feed is smoothed onto the one-second clock above, which blurs when a car stops
+    # and when it moves off by up to half a second. Ferrari's stops (the ghost shares the box with
+    # Leclerc) are also timed the way real double stacks on OpenF1 were: the longest run at 0 km/h
+    # in the car's speed trace during each visit to the pit lane.
+    team = next(d["team_name"] for d in drivers if d["driver_number"] == HAM)
+    box_stops = {}
+    for d in drivers:
+        dn = d["driver_number"]
+        if d["team_name"] != team:
+            continue
+        for a, z in pit_windows.get(str(dn), []):
+            q0 = datetime.fromtimestamp(race_t0 + a, timezone.utc).strftime(fmt)
+            q1 = datetime.fromtimestamp(race_t0 + z, timezone.utc).strftime(fmt)
+            speeds = sorted((ts(r["date"]) - race_t0, r["speed"]) for r in get(
+                "car_data?session_key=%d&driver_number=%d&date>%s&date<%s" % (SESSION, dn, q0, q1))
+                if r.get("date") and r.get("speed") is not None)
+            best, run = None, None
+            for st, v in speeds:
+                if v <= 0:
+                    run = [st, st] if run is None else [run[0], st]
+                    if best is None or run[1] - run[0] > best[1] - best[0]:
+                        best = list(run)
+                else:
+                    run = None
+            if best:
+                box_stops.setdefault(str(dn), []).append([round(best[0], 2), round(best[1], 2)])
+    print("standing in the box (speed trace):", {d["name_acronym"]: box_stops[str(d["driver_number"])]
+                                                for d in drivers if str(d["driver_number"]) in box_stops})
+
     # --- race events for the ticker and the timeline ------------------------------
     codes = {d["driver_number"]: d["name_acronym"] for d in drivers}
     events = []
@@ -687,6 +717,7 @@ def main(out_path):
         "pit_lane_starts": pit_lane_starts,
         "pit_lane": pit_lane,
         "pit_windows": pit_windows,
+        "box_stops": box_stops,
         "retired": stops,
         "events": events,
     }
