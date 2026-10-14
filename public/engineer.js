@@ -1,6 +1,7 @@
 // The race engineer: a summary of the race, and the radio and debrief built from pre-written lines
 // (data/engineer.json). No network needed. Shared by the browser and the tests.
 import { HAM, realStrategy, classify, validateStrategy, tyreAt, progressAt, pitLoss, realProgress, ghostProgress } from "./sim.js";
+import { vscPeriods } from "./moments.js";
 
 export function stintSpans(stints, total = 62) {
   return stints.map((s, i) => {
@@ -186,16 +187,6 @@ function carJustAhead(race, ghost, lap, window) {
 }
 
 const MAX_RADIO = 16;
-
-// VSC periods from race control, [deployed, ending] in race seconds.
-export function vscPeriods(race) {
-  const out = [];
-  for (const e of race.events || []) {
-    if (e.kind === "vsc") out.push([e.t, Infinity]);
-    else if (e.kind === "vsc_end" && out.length && out.at(-1)[1] === Infinity) out.at(-1)[1] = e.t;
-  }
-  return out;
-}
 
 // Race time `frac` of the way through the ghost's `lap`; just after the flag for any later lap.
 export function ghostLapTime(ghost, lap, frac) {

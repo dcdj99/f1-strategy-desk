@@ -650,6 +650,10 @@ def main(out_path):
             e["at"] = went_off[k]
     for p in pits:
         t_ = ts(p["date"]) - race_t0
+        # OpenF1 stamps a stop near the pit exit; the map shows the car in the pit lane from its entry.
+        win = [w for w in pit_windows.get(str(p["driver_number"]), []) if w[0] - 60 <= t_ <= w[1] + 60]
+        if win:
+            t_ = win[0][0]
         add(t_, p["lap_number"], "pit", "%s pits" % codes.get(p["driver_number"], p["driver_number"]), p["driver_number"])
     for dn, b in timelines.items():
         if b and len(b) < TOTAL_LAPS and b[-1][1] < leader_finish:

@@ -200,7 +200,7 @@ button, select { font: inherit; color: inherit; }
   position: absolute; top: 0; bottom: 0;
   background: repeating-linear-gradient(-45deg, rgba(8, 18, 39, 0.55) 0 4px, transparent 4px 9px);
   border-top: 3px solid var(--sodium); border-bottom: 3px solid var(--sodium);
-  pointer-events: none; z-index: 2;
+  min-width: 6px; pointer-events: none; z-index: 2;
 }
 .ruler .stint {
   position: absolute; top: 0; bottom: 0; border: 0; padding: 0 0.5rem;

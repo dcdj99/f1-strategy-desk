@@ -3,6 +3,7 @@ import {
   realProgress, ghostProgress, timeAtGhostLaps, raceOdds, pitLoss, inWindow,
 } from "./sim.js";
 import { buildSummary, builtInRadio, builtInDebrief, timeLapRadio, stintSpans as spans } from "./engineer.js";
+import { outAt, raceMoments, timelineMarks } from "./moments.js";
 
 const $ = (id) => document.getElementById(id);
 const [race, BANK, CONFIG] = await Promise.all([
@@ -12,7 +13,6 @@ const [race, BANK, CONFIG] = await Promise.all([
   fetch("api/config").then((r) => (r.ok ? r.json() : {})).catch(() => ({})),
 ]);
 const TOTAL = race.race.total_laps;
-const VSC = new Set(race.race.neutralised_laps);
 const driverByNum = Object.fromEntries(race.drivers.map((d) => [d.num, d]));
 const REAL_STINTS = realStrategy(race);
 const REAL_POS = driverByNum[HAM].final_pos;
@@ -61,19 +61,13 @@ const PIT_SPEED = 8;
 
 // A retired car stays on the map where it stopped for this long, so you can see what brought out the VSC.
 const STOPPED_SHOWN_S = 180;
-const stopOf = (num) => (retired(num) ? race.retired?.[String(num)] : null);
 
-// Moments pointed out on the map at the car involved: a car going off (the stewards' messages, which
-// come a minute or more later, give the time) and a car stopping.
-const CALLOUTS = [];
-for (const e of EVENTS) {
-  const code = driverByNum[e.driver]?.code;
-  if (e.kind === "incident" && e.at != null && !CALLOUTS.some((c) => c.num === e.driver && c.t === e.at)) {
-    CALLOUTS.push({ t: e.at, num: e.driver, what: e.what });
-  } else if (e.kind === "out") {
-    CALLOUTS.push({ t: e.t, num: e.driver, what: e.text.replace(`${code} `, "") });
-  }
-}
+// Everything that happened, when it happened. The ticker, the map, the marks under the strategy bar
+// and the tower all read their times from here, so they agree.
+const MOMENTS = raceMoments(race);
+// Pointed out on the map at the car involved: a car going off and a car stopping.
+const CALLOUTS = MOMENTS.filter((m) => m.kind === "off" || m.kind === "out")
+  .map((m) => ({ t: m.t, num: m.driver, what: m.kind === "off" ? m.what : m.text.replace(`${driverByNum[m.driver]?.code} `, "") }));
 // Each stays up about three seconds on screen, longer at slow replay speeds.
 const calloutsAt = (t) => CALLOUTS.filter((c) => t >= c.t && t < c.t + Math.max(8, 3 * state.speed));
 
@@ -304,15 +298,16 @@ function render() {
     if (!b.length) continue;
     const done = t > b[b.length - 1][1];
     // A retired car runs on after its last lap until it stops, then stays there a while.
-    const stop = stopOf(d.num);
-    if (done && retired(d.num) && !(stop && t < stop.t + STOPPED_SHOWN_S)) continue;
-    const stopped = stop && t >= stop.t;
+    const out = outAt(race, d.num);
+    if (out !== null && t >= out + STOPPED_SHOWN_S) continue;
+    const stopped = out !== null && t >= out;
     const p = realProgress(race, d.num, t);
     // Pit-lane starters wait at the pit exit until the field has gone past.
     const waiting = startAt(d.num, t);
-    const pit = (!done && realInPit(d.num, t)) || (stop?.pit != null && t >= stop.pit);
+    const pitStop = out !== null ? race.retired?.[String(d.num)]?.pit : null;
+    const pit = (!done && realInPit(d.num, t)) || (pitStop != null && t >= pitStop);
     const [x, y] = waiting !== null ? lanePoint(waiting) : pit ? lanePoint(p) : pointAt(p);
-    drawCar(x, y, 5.5, d.colour, { alpha: stopped ? 0.6 : done && !stop ? 0.35 : 0.9 });
+    drawCar(x, y, 5.5, d.colour, { alpha: stopped ? 0.6 : done && out === null ? 0.35 : 0.9 });
     if (stopped) drawStopped(x, y);
     const call = calls.find((c) => c.num === d.num);
     if (call) {
@@ -399,9 +394,12 @@ function updateTower() {
   for (const d of race.drivers) {
     const b = timeline(d.num);
     if (!b.length) continue;
-    const done = t > b[b.length - 1][1];
-    const p = done ? b.length : realProgress(race, d.num, t);
-    rows.push({ num: d.num, code: d.code, colour: d.colour, p, finishedAt: done ? b[b.length - 1][1] : Infinity, out: done && outOfRace(d.num) });
+    // A retired car drives on after its last timed lap and is out once it stops, as on the map.
+    const out = outAt(race, d.num);
+    const finished = out === null && t > b[b.length - 1][1];
+    const stopped = out !== null && t >= out;
+    const p = finished ? b.length : realProgress(race, d.num, t);
+    rows.push({ num: d.num, code: d.code, colour: d.colour, p, finishedAt: finished ? b[b.length - 1][1] : Infinity, out: stopped && outOfRace(d.num), stopped });
   }
   const order = (a, b) => (a.out - b.out) || (b.p - a.p) || (a.finishedAt - b.finishedAt);
   rows.sort(order);
@@ -420,8 +418,8 @@ function updateTower() {
   }
 
   towerList.innerHTML = rows.map((r) => {
-    const cls = [r.you ? "you" : "", r.num === HAM ? "ham" : "", r.out ? "out" : ""].join(" ");
-    const note = r.you ? "you" : r.num === HAM ? "real" : r.out ? "out" : "";
+    const cls = [r.you ? "you" : "", r.num === HAM ? "ham" : "", r.stopped ? "out" : ""].join(" ");
+    const note = r.you ? "you" : r.num === HAM ? "real" : r.stopped ? "out" : "";
     return `<li class="${cls}"><span class="pos">${r.you ? "P" + r.pos : r.pos}</span><span class="bar" style="background:${r.colour}"></span>` +
       `<span class="code">${r.code}</span><span class="note">${note}</span></li>`;
   }).join("");
@@ -478,13 +476,13 @@ function updateHud() {
 
 let tickerKey = "";
 function updateTicker() {
-  const happened = state.running ? EVENTS.filter((e) => e.t <= state.t) : [];
+  const happened = state.running ? MOMENTS.filter((e) => e.t <= state.t) : [];
   const recent = happened.slice(-3);
   const key = recent.map((e) => e.t).join(",");
   if (key === tickerKey) return;
   tickerKey = key;
   $("ticker").innerHTML = recent.map((e) =>
-    `<li class="${e.kind}"><span class="tlap">Lap ${e.lap}</span><span class="ttext" title="${escapeHtml(e.text)}">${escapeHtml(shortEvent(e.text))}</span></li>`).join("");
+    `<li class="${e.kind === "off" ? "incident" : e.kind}"><span class="tlap">Lap ${currentLeaderLap(e.t)}</span><span class="ttext" title="${escapeHtml(e.text)}">${escapeHtml(shortEvent(e.text))}</span></li>`).join("");
 }
 
 // Stewards' wording is long; the ticker gets one line.
@@ -517,12 +515,12 @@ const stintSpans = (stints) => spans(stints, TOTAL);
 function renderRuler() {
   const st = state.stints;
   let html = "";
-  const v = [...VSC].sort((a, b) => a - b);
-  for (let i = 0; i < v.length; i++) {
-    let j = i;
-    while (j + 1 < v.length && v[j + 1] === v[j] + 1) j++;
-    html += `<span class="vsc" title="Virtual safety car, laps ${v[i]}–${v[j]}: boxing at the end of lap ${v[j] - v[i] > 1 ? `${v[i]}–${v[j] - 1}` : v[i]} is cheaper" style="left:${pct(v[i])};width:${((v[j] - v[i] + 1) / TOTAL) * 100}%"></span>`;
-    i = j;
+  // Each VSC from when it came out to when it ended, where the playhead is then.
+  for (const m of timelineMarks(race, barLaps).filter((x) => x.kind === "vsc")) {
+    const cheap = [];
+    for (let p = Math.floor(m.at); p <= Math.ceil(m.to); p++) if (p >= 1 && pitLoss(race, p) < race.model.pit_loss_green - 0.5) cheap.push(p);
+    html += `<span class="vsc" title="Virtual safety car${cheap.length ? `: boxing at the end of lap ${cheap.join(" or ")} is cheaper` : ""}" ` +
+      `style="left:${(m.at / TOTAL) * 100}%;width:${((m.to - m.at) / TOTAL) * 100}%"></span>`;
   }
   for (const s of stintSpans(st)) {
     html += `<div class="stint ${s.compound.toLowerCase()}" style="left:${pct(s.from)};width:${(s.laps / TOTAL) * 100}%">${compoundName(s.compound)} ${s.laps}</div>`;
@@ -532,6 +530,7 @@ function renderRuler() {
       `aria-label="Stop ${i + 1}: box at the end of lap ${s.from - 1}. Arrow keys move it, Delete removes it."><span>Box ${s.from - 1}</span></button>`;
   });
   ruler.innerHTML = html;
+  renderEventLane();
   renderSheet();
 
   const v2 = validateStrategy(race, st);
@@ -588,26 +587,25 @@ function renderSheet() {
   if (keep) $("stops").querySelector(`[data-key="${keep}"]`)?.focus();
 }
 
+// Laps done at race time t along the strategy bar: your ghost's once you race (where the playhead is),
+// Hamilton's while you plan.
+const barLaps = (t) => Math.min(TOTAL, state.ghost ? ghostProgress(race, state.ghost, t) : realProgress(race, HAM, t));
+
+// Marks under the bar, each where the playhead is when it happens: a lapped car's retirement goes
+// by the time it stopped, not its own lap count.
+function renderEventLane() {
+  const x = (laps) => `${(laps / TOTAL) * 100}%`;
+  $("event-lane").innerHTML = timelineMarks(race, barLaps).map((m) =>
+    m.kind === "vsc" ? `<span class="vsc-tag row1" style="left:${x(m.at)}" title="VSC deployed">VSC</span>`
+    : m.kind === "out" ? `<span class="out row2" style="left:${x(m.at)}" title="${escapeHtml(m.text)}">✕ ${escapeHtml(driverByNum[m.driver]?.code || "")}</span>`
+    : `<span class="incident row2" style="left:${x(m.at)}" title="${escapeHtml(m.text)}">! ${escapeHtml(m.text.replace("Turn ", "T"))}</span>`).join("");
+}
+
 function renderStaticTimeline() {
   $("ferrari-strip").innerHTML = stintSpans(REAL_STINTS).map((s) =>
     `<span class="seg ${s.compound.toLowerCase()}" style="left:${pct(s.from)};width:${(s.laps / TOTAL) * 100}%">` +
     `${s.i === 0 ? "Ferrari: " : ""}${compoundName(s.compound)} ${s.laps}</span>`).join("");
 
-  const lane = [];
-  for (const e of EVENTS.filter((e) => e.kind === "vsc")) {
-    lane.push(`<span class="vsc-tag row1" style="left:${pct(e.lap + 1)}" title="${escapeHtml(e.text)}">VSC</span>`);
-  }
-  for (const e of EVENTS.filter((e) => e.kind === "out")) {
-    lane.push(`<span class="out row2" style="left:${pct(e.lap + 0.5)}" title="${escapeHtml(e.text)}">✕ ${escapeHtml(driverByNum[e.driver]?.code || "")}</span>`);
-  }
-  const flagged = new Set();
-  for (const e of EVENTS.filter((e) => e.kind === "incident" && e.driver === HAM)) {
-    if (flagged.has(e.driver)) continue;
-    flagged.add(e.driver);
-    const code = driverByNum[e.driver]?.code || "";
-    lane.push(`<span class="incident row2" style="left:${pct(e.lap + 0.5)}" title="${escapeHtml(e.text)}">! ${escapeHtml(code)} off at T1</span>`);
-  }
-  $("event-lane").innerHTML = lane.join("");
   $("ruler-scale").innerHTML = [1, 10, 20, 30, 40, 50, 62].map((l) => `<span style="left:${pct(l + 0.5)}">${l}</span>`).join("");
 }
 

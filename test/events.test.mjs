@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { simulateGhost, realStrategy, realProgress, ghostProgress, pitLoss, progressAt, HAM } from "../public/sim.js";
-import { buildSummary, builtInRadio, vscPeriods } from "../public/engineer.js";
+import { simulateGhost, realStrategy, realProgress, ghostProgress, pitLoss, progressAt, inWindow, HAM } from "../public/sim.js";
+import { buildSummary, builtInRadio } from "../public/engineer.js";
+import { vscPeriods, outAt, raceMoments, timelineMarks } from "../public/moments.js";
 
 const race = JSON.parse(readFileSync(new URL("../public/data/race.json", import.meta.url), "utf8"));
 const bank = JSON.parse(readFileSync(new URL("../public/data/engineer.json", import.meta.url), "utf8"));
@@ -107,4 +108,47 @@ test("each incident is placed when it happened, before the stewards' message", (
   const spots = t1.map((e) => realProgress(race, e.driver, e.at) % 1);
   console.log(`Turn 1 incidents at ${spots.map((f) => f.toFixed(3)).join(", ")} of a lap`);
   assert.ok(Math.max(...spots) - Math.min(...spots) < 0.03, `Turn 1 at ${spots}`);
+});
+
+test("the map, the ticker, the marks under the strategy bar and the tower agree on when each thing happened", () => {
+  const moments = raceMoments(race);
+  const code = Object.fromEntries(race.drivers.map((d) => [d.num, d.code]));
+  // A stop shows in the ticker as the map shows the car turning into the pit lane.
+  for (const e of moments.filter((m) => m.kind === "pit")) {
+    const wins = race.pit_windows[String(e.driver)];
+    assert.ok(!inWindow(wins, e.t - 0.5) && inWindow(wins, e.t + 0.5), `${e.text} at ${e.t}s, pit lane ${JSON.stringify(wins)}`);
+  }
+  // A car is out (tower, ticker, map) when it stops, not when its last timed lap ends.
+  for (const d of race.drivers) {
+    const out = outAt(race, d.num);
+    const events = moments.filter((m) => m.kind === "out" && m.driver === d.num);
+    if (out === null) { assert.equal(events.length, 0, d.code); continue; }
+    assert.deepEqual(events.map((e) => e.t), [out], `${d.code}: out at ${out}s`);
+    if (race.retired[String(d.num)]) assert.equal(out, race.retired[String(d.num)].t, d.code);
+  }
+  // Going off shows at the moment it happened.
+  for (const e of moments.filter((m) => m.kind === "incident")) {
+    assert.ok(moments.some((m) => m.kind === "off" && m.driver === e.driver && m.t === e.at), `${e.text}: no moment for it`);
+  }
+  // Marks under the bar sit where the playhead is when it happens: a lapped car's retirement too.
+  const ghost = simulateGhost(race, realStrategy(race));
+  const lapsAt = (t) => ghostProgress(race, ghost, t);
+  const marks = timelineMarks(race, lapsAt);
+  assert.deepEqual(marks.filter((m) => m.kind === "vsc").map((m) => [m.t, m.end]), vscPeriods(race));
+  assert.deepEqual(marks.filter((m) => m.kind === "off").map((m) => m.t), [moments.find((m) => m.kind === "incident" && m.driver === HAM).at]);
+  for (const m of marks) {
+    assert.equal(m.at, lapsAt(m.t), `${m.kind} at ${m.t}s`);
+    if (m.kind === "out") {
+      assert.equal(m.t, outAt(race, m.driver), code[m.driver]);
+      const own = race.timelines[String(m.driver)].length;
+      console.log(`${code[m.driver]} stops at ${m.t}s: playhead on ${m.at.toFixed(2)} laps; its own lap count ${own}`);
+    }
+  }
+  // The VSC band covers the stops priced as VSC stops, and not the laps either side.
+  const green = race.model.pit_loss_green;
+  for (const m of timelineMarks(race, (t) => realProgress(race, HAM, t)).filter((x) => x.kind === "vsc")) {
+    for (let p = Math.floor(m.at) - 1; p <= Math.ceil(m.to) + 1; p++) {
+      assert.equal(p >= m.at && p <= m.to, pitLoss(race, p) < green - 0.5, `VSC ${m.at.toFixed(2)}-${m.to.toFixed(2)} laps, box at the end of lap ${p}`);
+    }
+  }
 });

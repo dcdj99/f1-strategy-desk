@@ -35,7 +35,9 @@ Stop the server with Ctrl+C.
    - Drag a stop along the bar to move it, or use the arrows next to it in the pit sheet. With a stop
      selected, the arrow keys move it and Delete removes it; the × in the pit sheet removes it too.
    - Choose the tyre each stop fits. You must use both compounds or the ghost is disqualified.
-   - The marks under the bar show when the VSCs and retirements happened. The pit sheet shows what each
+   - The marks under the bar show when the VSCs, retirements and Hamilton's Turn 1 moment happened, each
+     where the playhead will be at that moment (on Hamilton's laps while you plan, yours once you race).
+     The hatched bands run from when each VSC came out to when it ended. The pit sheet shows what each
      stop costs: cheaper only when you come in with the VSC out, which means boxing at the end of lap 8 or 39.
    - **Reset to Ferrari's call** puts back the real strategy.
 2. **Press Race.** Your ghost Hamilton (white) races the real Hamilton on Ferrari's strategy (red) through
@@ -112,6 +114,11 @@ elsewhere. Run the tests with `npm test`.
   where the position feed shows it stopping (under 10 m in 10 s), not back at the line; Albon stopped in
   the pit lane. The radio is timed on the race clock from the same events, and a pass call waits until
   the map shows the ghost past.
+- The ticker, the map, the timing tower and the marks under the strategy bar take their times from one
+  list (`public/moments.js`), so they show each event together. A stop shows when the car turns into the
+  pit lane (OpenF1 stamps it near the exit, about 27s later). A retired car counts as out once it stops,
+  not when its last timed lap ends. Marks under the bar go by time, not by the car's own lap count, which
+  put lapped cars' retirements up to two laps early. The ticker's lap is the leader's, as in the lap counter.
 - The rolls are seeded per lap and car, so a race replays the same way, and two strategies that meet the same
   car on the same lap get the same luck. The finish card reruns your strategy 200 times with different luck
   and shows how often each position came up.
@@ -124,7 +131,8 @@ elsewhere. Run the tests with `npm test`.
   slow down on the map like real cars, that every radio call comes after what it talks about (no VSC
   talk before the VSC is out, no pass call before the map shows the pass), that a stop is priced as
   under the VSC only when the ghost comes in with it out, that retired cars stop where the feed shows,
-  and that each incident is placed when it happened.
+  that each incident is placed when it happened, and that the ticker, map, tower and marks under the bar
+  agree on when each thing happened.
 - The race engineer is built in. `public/data/engineer.json` holds pre-written radio and debrief lines for
   every situation the replay produces: the start, pit calls (normal, early, late, under the VSC), where a
   stop rejoins, staying out under the VSC, being stuck behind a car with the odds of getting by, passes
