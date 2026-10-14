@@ -409,6 +409,8 @@ def main(out_path):
 
     progress = {}
     geo = {}  # every position sample: (race time, lap fraction, distance from the racing line, x, y)
+    stops = {}  # retired cars: when they stopped, and when they turned into the pit lane if they stopped there
+    leader_finish = min(b[TOTAL_LAPS - 1][1] for b in timelines.values() if len(b) >= TOTAL_LAPS)
     for dn in sorted(snapped):
         # unwrap the lap fraction into continuous laps
         series, prev_f, u, rows_geo = [], None, 0.0, []
@@ -464,11 +466,27 @@ def main(out_path):
         # Anchor: crossing the line to start lap 2 is exactly one lap of progress.
         offset = round(1.0 - smooth(bounds[1][0]))
         finish = bounds[-1][1]
+        # A car that retires drives on after its last timed lap until it stops: hold it where it
+        # stopped (under 10 m in 10 s), not at the line.
+        hold_from, hold = finish, float(len(bounds))
+        if len(bounds) < TOTAL_LAPS and finish < leader_finish:
+            for st, _u in series[bisect.bisect_left(times, finish):]:
+                if st > finish + 600:
+                    break
+                if interp(st + 10) - interp(st) < 0.002:
+                    hold_from, hold = st, smooth(st) + offset
+                    stops[str(dn)] = {"t": round(st, 1)}
+                    # Stopped off the racing line, in the pit lane: from when it turned in.
+                    near = [r for r in rows_geo if finish <= r[0] <= st + 20]
+                    if near and near[-1][2] > OFF_LINE:
+                        on = [r[0] for r in near if r[2] <= OFF_LINE]
+                        stops[str(dn)]["pit"] = round(next(r[0] for r in near if r[0] > (on[-1] if on else 0)), 1)
+                    break
         vals, peak = [], -1e9
         for k in range(grid_n):
             p = smooth(float(k)) + offset
-            if k > finish:
-                p = min(p, float(len(bounds)))
+            if k > hold_from:
+                p = min(p, hold)
             peak = max(peak, p)  # never run backwards (projection jitter in the pit box)
             vals.append(int(round(peak * 10000)))
         progress[str(dn)] = vals
@@ -583,6 +601,19 @@ def main(out_path):
         r"(NOTED|UNDER INVESTIGATION|REVIEWED NO FURTHER INVESTIGATION|NO FURTHER ACTION|WILL BE INVESTIGATED AFTER THE RACE)"
         r"(?: - (.*))?")
     seen_inc = set()
+    went_off = {}  # (driver, turn): race time of the incident, from the latest message about it
+    incidents = []  # (event, (driver, turn))
+
+    def clock_time(msg, t_msg):
+        # Stewards' messages end with the track's local clock time of the incident, "(21:31:36)".
+        # The message itself is stamped in UTC; the time zone is a whole number of hours and the
+        # incident came less than half an hour before the message.
+        m_ = re.search(r"\((\d\d):(\d\d):(\d\d)\)\s*$", msg)
+        if not m_:
+            return None
+        clock = int(m_.group(1)) * 3600 + int(m_.group(2)) * 60 + int(m_.group(3))
+        diff = (clock - (t_msg + race_t0)) % 86400
+        return t_msg + diff - round(diff / 3600.0) * 3600
     for m in sorted(rc, key=lambda m: m["date"]):
         msg = m.get("message") or ""
         t_ = ts(m["date"]) - race_t0
@@ -601,6 +632,9 @@ def main(out_path):
             mm = inc_re.search(msg)
             if mm:
                 turn, num, code, status, why = mm.groups()
+                at = clock_time(msg, t_)
+                if at is not None and at >= 0:
+                    went_off[(int(num), turn)] = round(at, 1)  # an update corrects the time
                 key = (num, status)
                 if key in seen_inc or (status == "NOTED" and msg.startswith("UPDATE")):
                     continue
@@ -608,14 +642,23 @@ def main(out_path):
                 why = re.sub(r"\s*\(\d\d:\d\d:\d\d\)", "", (why or "")).strip().lower()
                 where = ("Turn %s: " % turn) if turn else ""
                 add(t_, lap, "incident", "%s%s %s (%s)" % (where, code, why or "incident", status.lower()), int(num))
+                what = "off" if why.startswith("leaving the track") else (why or "incident")
+                events[-1]["what"] = what + (" at Turn %s" % turn if turn else "")
+                incidents.append((events[-1], (int(num), turn)))
+    for e, k in incidents:
+        if k in went_off:
+            e["at"] = went_off[k]
     for p in pits:
         t_ = ts(p["date"]) - race_t0
         add(t_, p["lap_number"], "pit", "%s pits" % codes.get(p["driver_number"], p["driver_number"]), p["driver_number"])
-    leader_finish = min(b[TOTAL_LAPS - 1][1] for b in timelines.values() if len(b) >= TOTAL_LAPS)
     for dn, b in timelines.items():
         if b and len(b) < TOTAL_LAPS and b[-1][1] < leader_finish:
-            add(b[-1][1], len(b) + 1, "out", "%s retires" % codes.get(dn, dn), dn)
+            # When it stopped; its last timed lap if the feed doesn't show a stop.
+            s = stops.get(str(dn), {})
+            add(s.get("t", b[-1][1]), len(b) + 1, "out", "%s retires%s" % (codes.get(dn, dn), " in the pit lane" if "pit" in s else ""), dn)
     events.sort(key=lambda e: e["t"])
+    print("retired cars stop:", {codes.get(int(dn), dn): s for dn, s in stops.items()})
+    print("incidents happened at:", {"%s %s" % (codes.get(dn, dn), turn or ""): at for (dn, turn), at in went_off.items()})
 
     # --- final classification -------------------------------------------------
     last_pos = {}
@@ -640,6 +683,7 @@ def main(out_path):
         "pit_lane_starts": pit_lane_starts,
         "pit_lane": pit_lane,
         "pit_windows": pit_windows,
+        "retired": stops,
         "events": events,
     }
     with open(out_path, "w", encoding="utf-8") as f:

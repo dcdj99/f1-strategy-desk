@@ -36,14 +36,17 @@ Stop the server with Ctrl+C.
      selected, the arrow keys move it and Delete removes it; the × in the pit sheet removes it too.
    - Choose the tyre each stop fits. You must use both compounds or the ghost is disqualified.
    - The marks under the bar show when the VSCs and retirements happened. The pit sheet shows what each
-     stop costs (cheaper under the VSC).
+     stop costs: cheaper only when you come in with the VSC out, which means boxing at the end of lap 8 or 39.
    - **Reset to Ferrari's call** puts back the real strategy.
 2. **Press Race.** Your ghost Hamilton (white) races the real Hamilton on Ferrari's strategy (red) through
    the field.
    - Pick a replay speed (1× is real time) and drag along the timeline to jump to any lap. While you or
      Hamilton are in the pit lane the replay drops to 8×, so you can see the stop.
    - The timing tower shows the order, the big number shows your gap to Ferrari's call, and the pit
-     wall talks on the radio: box calls, traffic, the odds of passing the car you're stuck behind.
+     wall talks on the radio: box calls, traffic, the odds of passing the car you're stuck behind. Each
+     call plays just after what it talks about: a VSC call once the VSC is out, a pass once you're past.
+   - The map rings a car the moment something happens to it: going off at a corner, or stopping. A car
+     that retires stays where it stopped, crossed out, for three minutes of race time.
    - **Pause**, **Restart**, or **Change strategy** to go back to planning.
 3. **Read the finish card.** Your result against Ferrari's, how often each position came up over 200
    reruns with different passing luck, and the race engineer's debrief. **Try another strategy** to go again.
@@ -91,6 +94,8 @@ elsewhere. Run the tests with `npm test`.
 - The ghost replays Hamilton's real laps and swaps in only what your strategy changes: tyre pace from
   a model fitted on 1,045 clean laps (fuel burn, soft vs medium, wear, and a cliff fitted on Hamilton's
   own 44-lap soft stint) and pit cost (23.6s green, 13.8s under the VSC, both measured from real stops).
+  A stop counts as under the VSC only when the VSC is out as the car comes in: boxing a lap earlier,
+  the car is back out before it's deployed, and a lap later it has ended.
   Within each lap it borrows the real car's motion, so it slows where he slowed. Every stop, green or VSC,
   drives Hamilton's real 33s run down the pit lane, standstill included, lined up on the timing line.
 - Traffic follows the ghost. While it is within 0.5s of where Hamilton really was, it gets his real lap,
@@ -101,6 +106,12 @@ elsewhere. Run the tests with `npm test`.
   8% a lap at equal pace, 13% at 1s a lap quicker and 19% at 2s. Each lap in range the ghost rolls against
   those odds. A pass costs 1.1s against its own pace; a car that can't get by sits 0.7s behind at the line.
   No passing under the VSC, and cars in the pit lane don't block.
+- Race events sit where they happened. The stewards post an incident a minute or more after it, and each
+  message gives the local clock time it happened (an update corrects it: Sainz's Turn 1 moment was on
+  lap 1, not lap 7). The map shows the car going off at that moment, where it was. A retired car is held
+  where the position feed shows it stopping (under 10 m in 10 s), not back at the line; Albon stopped in
+  the pit lane. The radio is timed on the race clock from the same events, and a pass call waits until
+  the map shows the ghost past.
 - The rolls are seeded per lap and car, so a race replays the same way, and two strategies that meet the same
   car on the same lap get the same luck. The finish card reruns your strategy 200 times with different luck
   and shows how often each position came up.
@@ -109,8 +120,11 @@ elsewhere. Run the tests with `npm test`.
   classification matches the official result, that every pass the ghost makes came from Hamilton or a winning
   roll, that the fitted odds match what happened in each band of pace advantage, that moves come off as
   often as the odds say, that every ghost stop stands still as long as Hamilton's real one without jumping
-  or reversing, that every timed stop shows up as one spell in the pit lane, and that cars speed up and
-  slow down on the map like real cars.
+  or reversing, that every timed stop shows up as one spell in the pit lane, that cars speed up and
+  slow down on the map like real cars, that every radio call comes after what it talks about (no VSC
+  talk before the VSC is out, no pass call before the map shows the pass), that a stop is priced as
+  under the VSC only when the ghost comes in with it out, that retired cars stop where the feed shows,
+  and that each incident is placed when it happened.
 - The race engineer is built in. `public/data/engineer.json` holds pre-written radio and debrief lines for
   every situation the replay produces: the start, pit calls (normal, early, late, under the VSC), where a
   stop rejoins, staying out under the VSC, being stuck behind a car with the odds of getting by, passes
@@ -131,4 +145,7 @@ elsewhere. Run the tests with `npm test`.
 - Every ghost stop is Hamilton's one real stop replayed: the same time in the pit lane and in the box.
   The pit cost in the strategy comes from all the real stops, so a slow or quick stop doesn't change it.
 - Hard tyres weren't raced, so only softs and mediums are offered.
+- Opus tags its radio by lap, not by moment. Each Opus line takes the time of the built-in line on the
+  same lap, so it usually lands just after the event, but a line about something the built-in radio
+  didn't mention plays 40% into its lap.
 - The medium-tyre cliff is assumed (10 laps after the soft's); no medium ran long enough to show one.

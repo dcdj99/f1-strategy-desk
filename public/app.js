@@ -2,7 +2,7 @@ import {
   HAM, simulateGhost, realStrategy, validateStrategy, progressAt, classify, tyreAt, tyreModelLap,
   realProgress, ghostProgress, timeAtGhostLaps, raceOdds, pitLoss, inWindow,
 } from "./sim.js";
-import { buildSummary, builtInRadio, builtInDebrief, stintSpans as spans } from "./engineer.js";
+import { buildSummary, builtInRadio, builtInDebrief, timeLapRadio, stintSpans as spans } from "./engineer.js";
 
 const $ = (id) => document.getElementById(id);
 const [race, BANK, CONFIG] = await Promise.all([
@@ -27,7 +27,7 @@ const state = {
   running: false,
   finished: false,
   speed: 60,
-  radio: [],        // queued messages {lap, from, text, shown}
+  radio: [],        // queued messages {t, lap, from, text, shown}, played at race time t
   ai: null,         // engineer response once it arrives
   summary: null,
   odds: null,       // finishing positions over many reruns with different passing luck
@@ -58,6 +58,24 @@ const realInPit = (num, t) => inWindow(race.pit_windows?.[String(num)], t);
 const ghostInPit = (t) => inWindow(state.ghost?.pitWindows, t);
 // The replay slows to this while you or Hamilton are in the pit lane, so the stop can be seen.
 const PIT_SPEED = 8;
+
+// A retired car stays on the map where it stopped for this long, so you can see what brought out the VSC.
+const STOPPED_SHOWN_S = 180;
+const stopOf = (num) => (retired(num) ? race.retired?.[String(num)] : null);
+
+// Moments pointed out on the map at the car involved: a car going off (the stewards' messages, which
+// come a minute or more later, give the time) and a car stopping.
+const CALLOUTS = [];
+for (const e of EVENTS) {
+  const code = driverByNum[e.driver]?.code;
+  if (e.kind === "incident" && e.at != null && !CALLOUTS.some((c) => c.num === e.driver && c.t === e.at)) {
+    CALLOUTS.push({ t: e.at, num: e.driver, what: e.what });
+  } else if (e.kind === "out") {
+    CALLOUTS.push({ t: e.t, num: e.driver, what: e.text.replace(`${code} `, "") });
+  }
+}
+// Each stays up about three seconds on screen, longer at slow replay speeds.
+const calloutsAt = (t) => CALLOUTS.filter((c) => t >= c.t && t < c.t + Math.max(8, 3 * state.speed));
 
 // A pit-lane starter waiting at the pit exit: where it really was (laps), or null once it has joined.
 function startAt(num, t) {
@@ -219,6 +237,31 @@ function drawCar(x, y, r, fill, opts = {}) {
   ctx.restore();
 }
 
+// A ring round a car something has just happened to.
+function drawCallout(x, y) {
+  const d = geo.dpr;
+  ctx.save();
+  ctx.strokeStyle = "#ffb547";
+  ctx.lineWidth = 2.5 * d;
+  ctx.beginPath();
+  ctx.arc(x, y, 13 * d, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// A cross over a car that has stopped.
+function drawStopped(x, y) {
+  const d = geo.dpr, r = 4 * d;
+  ctx.save();
+  ctx.strokeStyle = "#f3eedd";
+  ctx.lineWidth = 2 * d;
+  ctx.beginPath();
+  ctx.moveTo(x - r, y - r); ctx.lineTo(x + r, y + r);
+  ctx.moveTo(x + r, y - r); ctx.lineTo(x - r, y + r);
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawLabel(x, y, text, color, dy = -18, size = 16) {
   const d = geo.dpr;
   ctx.save();
@@ -253,20 +296,32 @@ function render() {
 
   let leader = null, ahead = null, behind = null;
   const pitLaneStart = [];
+  const calls = state.running ? calloutsAt(t) : [];
+  const callLabels = [];
   for (const d of race.drivers) {
     if (d.num === HAM) continue;
     const b = timeline(d.num);
     if (!b.length) continue;
     const done = t > b[b.length - 1][1];
-    if (done && retired(d.num)) continue;
+    // A retired car runs on after its last lap until it stops, then stays there a while.
+    const stop = stopOf(d.num);
+    if (done && retired(d.num) && !(stop && t < stop.t + STOPPED_SHOWN_S)) continue;
+    const stopped = stop && t >= stop.t;
     const p = realProgress(race, d.num, t);
     // Pit-lane starters wait at the pit exit until the field has gone past.
     const waiting = startAt(d.num, t);
-    const pit = !done && realInPit(d.num, t);
+    const pit = (!done && realInPit(d.num, t)) || (stop?.pit != null && t >= stop.pit);
     const [x, y] = waiting !== null ? lanePoint(waiting) : pit ? lanePoint(p) : pointAt(p);
-    drawCar(x, y, 5.5, d.colour, { alpha: done ? 0.35 : 0.9 });
+    drawCar(x, y, 5.5, d.colour, { alpha: stopped ? 0.6 : done && !stop ? 0.35 : 0.9 });
+    if (stopped) drawStopped(x, y);
+    const call = calls.find((c) => c.num === d.num);
+    if (call) {
+      drawCallout(x, y);
+      callLabels.push({ x, y, text: `${d.code} ${call.what}` });
+    }
     if (waiting !== null) pitLaneStart.push({ p, x, y, code: d.code });
-    else if (state.running && pit) drawLabel(x, y, `${d.code} pit`, "#ffb547", -14, 13);
+    else if (state.running && pit && !stopped && !call) drawLabel(x, y, `${d.code} pit`, "#ffb547", -14, 13);
+    if (stopped) continue;
     if (!leader || p > leader.p) leader = { p, x, y, code: d.code };
     if (gp !== null && !done) {
       if (p > gp && p - gp < 0.15 && (!ahead || p < ahead.p)) ahead = { p, x, y, code: d.code, pit };
@@ -280,6 +335,12 @@ function render() {
     placed.push(n);
     drawLabel(n.x, n.y, text, color, 22, size);
   };
+  // What just happened to a car: above it, or below it when you and Hamilton are labelled close by.
+  for (const c of callLabels) {
+    const nearUs = [[rx, ry], [gx, gy]].some(([qx, qy]) => Math.hypot(qx - c.x, qy - c.y) < 40 * geo.dpr);
+    drawLabel(c.x, c.y, c.text, "#ffb547", nearUs ? 24 : -20, 14);
+    placed.push(c);
+  }
   if (pitLaneStart.length) {
     const last = pitLaneStart.reduce((a, c) => (c.p < a.p ? c : a));
     underLabel(last, `${pitLaneStart.map((c) => c.code).join(" ")} from pit lane`, "#ffb547", 13);
@@ -290,16 +351,21 @@ function render() {
 
   // The real Hamilton, on Ferrari's strategy
   drawCar(rx, ry, 8, "#e8112d", { ring: "#ffffff" });
-  const realLabel = state.running && realPit ? "Hamilton (pit)" : "Hamilton";
+  const hamCall = calls.find((c) => c.num === HAM);
+  if (hamCall) drawCallout(rx, ry);
+  const realLabel = state.running && realPit ? "Hamilton (pit)" : hamCall ? `Hamilton ${hamCall.what}` : "Hamilton";
 
   // Your ghost Hamilton
   if (state.ghost) {
     drawCar(gx, gy, 9, "rgba(212,232,255,0.92)", { glow: "rgba(212,232,255,0.95)" });
+    // Where the ghost is driving Hamilton's real lap, it went off with him.
+    const youToo = hamCall && state.ghost.traffic[Math.floor(progressAt(timeline(HAM), hamCall.t))]?.mode === "lewis";
+    if (youToo) drawCallout(gx, gy);
     const info = state.running && t < state.ghost.finish ? state.ghost.traffic[Math.floor(progressAt(state.ghost.bounds, t))] : null;
     const stuck = info?.held ? `You (stuck behind ${info.held}${info.chance ? `, ${Math.round(info.chance * 100)}% a lap to pass` : ""})` : null;
-    const youLabel = ghostPit ? "You (pit)" : stuck || "You";
+    const youLabel = ghostPit ? "You (pit)" : youToo ? `You ${hamCall.what}` : stuck || "You";
     if (Math.hypot(gx - rx, gy - ry) < 40 * geo.dpr) {
-      drawLabel((gx + rx) / 2, Math.min(gy, ry), `${youLabel} + ${realLabel}`, "#f3eedd");
+      drawLabel((gx + rx) / 2, Math.min(gy, ry), youToo && !ghostPit && !realPit ? `You + Hamilton ${hamCall.what}` : `${youLabel} + ${realLabel}`, "#f3eedd");
     } else {
       drawLabel(rx, ry, realLabel, "#ff8b95");
       drawLabel(gx, gy, youLabel, "#d4e8ff");
@@ -401,11 +467,10 @@ function updateHud() {
     delta.hidden = true;
   }
 
-  // Radio: show messages up to the lap the ghost is on (works when scrubbing backwards too).
-  const ghostLap = Math.floor(gp) + 1;
+  // Radio: show messages once their moment has come (works when scrubbing backwards too).
   let changed = false;
   for (const m of state.radio) {
-    const show = m.lap <= ghostLap;
+    const show = m.t <= t;
     if (m.shown !== show) { m.shown = show; changed = true; }
   }
   if (changed) renderRadio();
@@ -456,7 +521,7 @@ function renderRuler() {
   for (let i = 0; i < v.length; i++) {
     let j = i;
     while (j + 1 < v.length && v[j + 1] === v[j] + 1) j++;
-    html += `<span class="vsc" title="Virtual safety car, laps ${v[i]}–${v[j]}: pit stops are cheaper" style="left:${pct(v[i])};width:${((v[j] - v[i] + 1) / TOTAL) * 100}%"></span>`;
+    html += `<span class="vsc" title="Virtual safety car, laps ${v[i]}–${v[j]}: boxing at the end of lap ${v[j] - v[i] > 1 ? `${v[i]}–${v[j] - 1}` : v[i]} is cheaper" style="left:${pct(v[i])};width:${((v[j] - v[i] + 1) / TOTAL) * 100}%"></span>`;
     i = j;
   }
   for (const s of stintSpans(st)) {
@@ -765,6 +830,7 @@ function startRace() {
   const ai = { debrief: builtInDebrief(race, ghost, summary, BANK, state.stints, odds), builtIn: true };
   Object.assign(state, { ghost, t: 0, playing: true, running: true, finished: false, ai, summary, note: "" });
   state.radio = builtInRadio(race, ghost, summary, BANK, state.stints).map((m) => ({ ...m, shown: false }));
+  const builtIn = state.radio;
   $("radio").innerHTML = "";
   $("tyres").hidden = false;
   $("finish").hidden = true;
@@ -775,10 +841,9 @@ function startRace() {
   askEngineer(summary).then((ai) => {
     if (state.ghost !== ghost) return;
     state.ai = ai;
-    const now = Math.floor(progressAt(ghost.bounds, state.t)) + 1;
-    const keep = state.radio.filter((m) => m.lap <= now);
-    const fresh = (ai.radio || []).filter((m) => m.lap > now).map((m) => ({ ...m, shown: false }));
-    state.radio = [...keep, ...fresh].sort((a, b) => a.lap - b.lap);
+    const keep = state.radio.filter((m) => m.t <= state.t);
+    const fresh = timeLapRadio(race, ghost, builtIn, ai.radio || []).filter((m) => m.t > state.t).map((m) => ({ ...m, shown: false }));
+    state.radio = [...keep, ...fresh].sort((a, b) => a.t - b.t);
     if (state.finished) fillDebrief();
   }).catch((err) => console.warn("Opus engineer unavailable, keeping the built-in lines:", err.message));
 }

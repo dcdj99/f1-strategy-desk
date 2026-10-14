@@ -40,13 +40,14 @@ export function tyreAt(stints, lap) {
   return { compound: cur.compound, age: (cur.ageAtStart || 0) + (lap - cur.from), stint: stints.indexOf(cur) };
 }
 
-// Pit cost for boxing at the end of `lap`. VSC stops are cheaper.
+// Pit cost for boxing at the end of `lap`. A stop is cheaper only when the VSC is out as the car
+// comes in: the VSC runs over the line, so that lap and the next are both neutralised. Boxing at the
+// end of the lap before (the VSC came out after the car had left the pits) or the lap after (it had
+// ended) costs a normal stop.
 export function pitLoss(race, lap) {
   const m = race.model;
   const vsc = new Set(race.race.neutralised_laps);
-  if (vsc.has(lap) && vsc.has(lap + 1)) return m.pit_loss_vsc;
-  if (vsc.has(lap) || vsc.has(lap + 1)) return (m.pit_loss_vsc + m.pit_loss_green) / 2;
-  return m.pit_loss_green;
+  return vsc.has(lap) && vsc.has(lap + 1) ? m.pit_loss_vsc : m.pit_loss_green;
 }
 
 const pitLapsOf = (stints) => stints.slice(1).map((s) => s.from - 1);
@@ -174,13 +175,14 @@ export function simulateGhost(race, stints, { seed = 1 } = {}) {
     const ahead = Object.entries(race.timelines)
       .filter(([n, b]) => n !== String(HAM) && b[lap - 1] && b[lap - 1][0] < t)
       .sort((a, b) => b[1][lap - 1][0] - a[1][lap - 1][0]);
+    const passedAt = {}; // where each car passed crosses the line
     for (const [n, b] of ahead) {
       const [carStart, carEnd] = b[lap - 1];
       if (end >= carEnd + P.followGap) continue;                           // never gets close to this car
       if (pitsOf(n).includes(lap) || pitsOf(n).includes(lap - 1)) continue; // it's in the pit lane
       // Hamilton started this lap behind this car, the ghost is where he was and no quicker: his result stands.
       if (copying && carStart < realS && natural <= realLaps[lap - 1] + 0.05) {
-        if (realE < carEnd) { info.passed.push(codes[n]); continue; }
+        if (realE < carEnd) { info.passed.push(codes[n]); passedAt[codes[n]] = carEnd; continue; }
         if (realE < carEnd + P.followGap) continue;
       }
       // A go at passing needs the lap started in range, no VSC, and no car already holding it up.
@@ -193,6 +195,7 @@ export function simulateGhost(race, stints, { seed = 1 } = {}) {
           // The move costs time, but it crosses the line ahead.
           end = Math.min(end + P.passCost, carEnd - TRAFFIC.justAhead);
           info.passed.push(codes[n]);
+          passedAt[codes[n]] = carEnd;
           continue;
         }
       }
@@ -202,6 +205,8 @@ export function simulateGhost(race, stints, { seed = 1 } = {}) {
       info.lost += carEnd + P.followGap - end;
       end = carEnd + P.followGap;
     }
+    // Caught behind a car further up the road, the ghost can cross the line behind a car it passed.
+    info.passed = info.passed.filter((c) => end < passedAt[c]);
     const dur = end - t;
     laps.push(dur);
     traffic.push(info);

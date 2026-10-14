@@ -1,6 +1,6 @@
 // The race engineer: a summary of the race, and the radio and debrief built from pre-written lines
 // (data/engineer.json). No network needed. Shared by the browser and the tests.
-import { HAM, realStrategy, classify, validateStrategy, tyreAt, progressAt, pitLoss } from "./sim.js";
+import { HAM, realStrategy, classify, validateStrategy, tyreAt, progressAt, pitLoss, realProgress, ghostProgress } from "./sim.js";
 
 export function stintSpans(stints, total = 62) {
   return stints.map((s, i) => {
@@ -187,6 +187,42 @@ function carJustAhead(race, ghost, lap, window) {
 
 const MAX_RADIO = 16;
 
+// VSC periods from race control, [deployed, ending] in race seconds.
+export function vscPeriods(race) {
+  const out = [];
+  for (const e of race.events || []) {
+    if (e.kind === "vsc") out.push([e.t, Infinity]);
+    else if (e.kind === "vsc_end" && out.length && out.at(-1)[1] === Infinity) out.at(-1)[1] = e.t;
+  }
+  return out;
+}
+
+// Race time `frac` of the way through the ghost's `lap`; just after the flag for any later lap.
+export function ghostLapTime(ghost, lap, frac) {
+  if (lap > ghost.bounds.length) return ghost.finish + 2;
+  const [a, z] = ghost.bounds[Math.max(1, lap) - 1];
+  return a + frac * (z - a);
+}
+
+// The ghost's spell in the pit lane at each stop, [in, out] in race seconds.
+const pitSpells = (ghost) => ghost.pitLaps.map((p, k) => ghost.pitWindows?.[k] ?? [ghost.bounds[p - 1][1] - 10, ghost.bounds[p - 1][1] + 23]);
+
+// When the ghost last went ahead of car `num` on the map (or fell behind it, for `ahead` false),
+// during the ghost's `lap` or just after the line, where two cars side by side can swap back and forth.
+function swapTime(race, ghost, num, lap, ahead) {
+  const [a, z] = ghost.bounds[lap - 1];
+  let last = z, prev = null;
+  for (let t = a; t <= z + 8; t += 0.25) {
+    const now = ghostProgress(race, ghost, t) > realProgress(race, num, t);
+    if (prev !== null && now === ahead && prev !== ahead) last = t;
+    prev = now;
+  }
+  return last;
+}
+
+// Each call plays at a race time, just after what it talks about: a VSC call once the VSC is out,
+// the out-lap call once the ghost leaves the pit lane, a pass once it's past on the map, a
+// retirement once the car has stopped, the stewards once they've posted.
 export function builtInRadio(race, ghost, summary, bank, stints) {
   const TOTAL = race.race.total_laps;
   const green = race.model.pit_loss_green;
@@ -197,102 +233,130 @@ export function builtInRadio(race, ghost, summary, bank, stints) {
   const nameOfCode = (c) => names[byCode[c]] || c;
   const pick = picker(stints);
   const copy = isCopy(race, ghost);
+  const vscs = vscPeriods(race);
+  const boxes = pitSpells(ghost);
+  const lapOf = (t) => (t >= ghost.finish ? TOTAL + 1 : Math.min(TOTAL, Math.floor(progressAt(ghost.bounds, t)) + 1));
   const msgs = [];
+  // Plays at race time t, labelled with the ghost's lap then. `lap` picks the wording.
   // Priority 0 always plays; higher numbers are dropped first when the race is busy.
-  const say = (lap, key, slots = {}, priority = 2) => {
+  const say = (t, lap, key, slots = {}, priority = 2) => {
     const group = bank.radio[key];
     if (!group) throw new Error(`no radio lines for ${key}`);
-    msgs.push({ lap, from: group.from, text: fill(pick(group.lines, key, lap), slots), key, priority, order: msgs.length });
+    msgs.push({ t: +t.toFixed(1), lap: lapOf(t), from: group.from, text: fill(pick(group.lines, key, lap), slots), key, priority, order: msgs.length });
   };
 
   // Lights out.
-  say(1, copy ? "start_copy" : stints[0].compound === "SOFT" && realStints[0].compound !== "SOFT" ? "start_softs" : "start_own", {}, 0);
+  say(ghost.bounds[0][0] + 2, 1, copy ? "start_copy" : stints[0].compound === "SOFT" && realStints[0].compound !== "SOFT" ? "start_softs" : "start_own", {}, 0);
 
   // Each stop: the call, then where it put us.
   ghost.pitLaps.forEach((p, k) => {
+    const [pitIn, pitOut] = boxes[k];
     const loss = pitLoss(race, p);
     const fitted = stints[k + 1].compound === "SOFT" ? "softs" : "mediums";
     const slots = { tyres: fitted, Tyres: fitted[0].toUpperCase() + fitted.slice(1), laps: TOTAL - p, loss: loss.toFixed(0), green: green.toFixed(0) };
-    if (loss < green - 0.5) say(p, "box_vsc", slots, 0);
-    else say(Math.max(1, p - 1), p <= 14 ? "box_early" : p >= 45 ? "box_late" : "box_next_lap", slots, 0);
+    // Under the VSC: called as it comes out, before the pit entry. Otherwise a lap ahead.
+    const vsc = vscs.find(([a, z]) => a <= pitIn && pitIn <= z);
+    if (loss < green - 0.5 && vsc) say(Math.max(vsc[0] + 1, Math.min(Math.max(vsc[0] + 3, ghostLapTime(ghost, p, 0) + 2), pitIn - 2)), p, "box_vsc", slots, 0);
+    else say(Math.min(ghostLapTime(ghost, Math.max(1, p - 1), 0.6), pitIn - 20), Math.max(1, p - 1), p <= 14 ? "box_early" : p >= 45 ? "box_late" : "box_next_lap", slots, 0);
     if (p + 1 > TOTAL) return;
     const ahead = carJustAhead(race, ghost, p + 1, 2.0);
-    if (ahead) say(p + 1, "out_lap_traffic", { car: names[ahead] }, 2);
-    else say(p + 1, "out_lap_clear", {}, 2);
-    if (k === 0) say(p + 1, "out_lap_reply", {}, 4);
+    if (ahead) say(pitOut + 3, p + 1, "out_lap_traffic", { car: names[ahead] }, 2);
+    else say(pitOut + 3, p + 1, "out_lap_clear", {}, 2);
+    if (k === 0) say(pitOut + 8, p + 1, "out_lap_reply", {}, 4);
   });
 
-  // VSCs we stay out for.
-  const v = [...race.race.neutralised_laps].sort((a, b) => a - b);
-  for (let i = 0; i < v.length; i++) {
-    let j = i;
-    while (j + 1 < v.length && v[j + 1] === v[j] + 1) j++;
-    if (!ghost.pitLaps.some((p) => p >= v[i] - 1 && p <= v[j])) say(v[i], "vsc_stay_out", {}, 1);
-    i = j;
+  // VSCs we stay out for: on track when it comes out and not boxing under it.
+  for (const [a, z] of vscs) {
+    if (a + 3 >= ghost.finish || boxes.some(([i, o]) => i <= z && o >= a)) continue;
+    say(a + 3, lapOf(a + 3), "vsc_stay_out", {}, 1);
   }
 
   // Stuck behind someone: the two longest spells.
   const spells = followingSpells(race, ghost).sort((a, b) => b.length - a.length).slice(0, 2);
   for (const s of spells) {
     const car = names[s.num];
-    say(s.from, "stuck_driver", { car }, 1);
-    if (s.chance > 0) say(s.from + 1, s.chance < 0.15 ? "stuck_odds_low" : "stuck_odds_high", { pct: Math.round(s.chance * 100) }, 2);
+    say(ghostLapTime(ghost, s.from, 0.4), s.from, "stuck_driver", { car }, 1);
+    if (s.chance > 0) say(ghostLapTime(ghost, s.from + 1, 0.4), s.from + 1, s.chance < 0.15 ? "stuck_odds_low" : "stuck_odds_high", { pct: Math.round(s.chance * 100) }, 2);
     if (s.length >= 6) {
       const mid = s.from + Math.floor(s.length / 2);
       const stopsLater = (race.pits[s.num] || []).some((p) => p > mid);
-      say(mid, stopsLater ? "stuck_long_pits_later" : "stuck_long", { car, laps: mid - s.from + 1 }, 3);
+      say(ghostLapTime(ghost, mid, 0.4), mid, stopsLater ? "stuck_long_pits_later" : "stuck_long", { car, laps: mid - s.from + 1 }, 3);
     }
   }
 
-  // Moves on track, both ways.
-  summary.traffic.passes_on_track.slice(0, 2).forEach((m, i) => say(m.lap, "pass_made", { car: nameOfCode(m.car) }, i ? 3 : 1));
+  // Moves on track, both ways, once the cars have swapped places.
+  summary.traffic.passes_on_track.slice(0, 2).forEach((m, i) =>
+    say(swapTime(race, ghost, byCode[m.car], m.lap, true) + 2, m.lap, "pass_made", { car: nameOfCode(m.car) }, i ? 3 : 1));
   const pitWindow = (lap) => ghost.pitLaps.some((p) => p === lap || p === lap - 1);
   const lost = summary.position_changes.find((m) => !pitWindow(m.lap) && m.passed_by.some((c) => !inPits(race, byCode[c], m.lap)));
-  if (lost) say(lost.lap, "passed_by", { car: nameOfCode(lost.passed_by.find((c) => !inPits(race, byCode[c], lost.lap))) }, 2);
+  if (lost) {
+    const c = lost.passed_by.find((x) => !inPits(race, byCode[x], lost.lap));
+    say(swapTime(race, ghost, byCode[c], lost.lap, false) + 2, lost.lap, "passed_by", { car: nameOfCode(c) }, 2);
+  }
 
   // Tyres past their best.
   const cliffLap = ghost.tyres.findIndex((t) => t.compound === "SOFT" && t.age > race.model.cliff_at.SOFT + 6);
-  if (cliffLap >= 0) say(cliffLap + 1, "cliff_soft", {}, 1);
+  if (cliffLap >= 0) say(ghostLapTime(ghost, cliffLap + 1, 0.5), cliffLap + 1, "cliff_soft", {}, 1);
   const longMed = ghost.tyres.findIndex((t) => t.compound === "MEDIUM" && t.age > race.model.cliff_at.MEDIUM);
-  if (longMed >= 0) say(longMed + 1, "long_mediums", {}, 3);
+  if (longMed >= 0) say(ghostLapTime(ghost, longMed + 1, 0.5), longMed + 1, "long_mediums", {}, 3);
 
-  // Where we stand against Ferrari's call with a third of the race left.
+  // Where we stand against Ferrari's call with a third of the race left, as we cross the line.
   const check = Math.round(TOTAL * 0.72);
   const g = summary.laps[check - 1].gap_to_ferrari;
-  say(check, copy || Math.abs(g) < 0.05 ? "gap_level" : g < 0 ? "gap_ahead" : "gap_behind", { gap: Math.abs(g).toFixed(1) }, 3);
+  say(ghost.bounds[check - 1][1] + 3, check, copy || Math.abs(g) < 0.05 ? "gap_level" : g < 0 ? "gap_ahead" : "gap_behind", { gap: Math.abs(g).toFixed(1) }, 3);
 
-  // Hamilton's Turn 1 moment: ours too if we're where he was.
+  // Hamilton's Turn 1 moment, once the stewards post it: ours too if we were where he was.
   const t1 = (race.events || []).filter((e) => e.kind === "incident" && e.driver === HAM);
   if (t1.length) {
-    const first = t1[0].lap;
-    if (ghost.traffic[first - 1]?.mode === "lewis") {
-      say(first, "t1_you", {}, 3);
+    const first = t1[0];
+    const offLap = Math.floor(progressAt(race.timelines[String(HAM)], first.at ?? first.t)) + 1;
+    if (ghost.traffic[offLap - 1]?.mode === "lewis") {
+      say(first.t + 3, first.lap, "t1_you", {}, 3);
       const cleared = t1.find((e) => /no further action/i.test(e.text));
-      if (cleared) say(cleared.lap, "t1_cleared", {}, 4);
+      if (cleared) say(cleared.t + 3, cleared.lap, "t1_cleared", {}, 4);
     } else {
-      say(first, "ferrari_off", {}, 4);
+      say(first.t + 3, first.lap, "ferrari_off", {}, 4);
     }
   }
 
-  // The retirement nearest to us on the road.
+  // The retirement nearest to us on the road, once the car has stopped.
   let nearest = null;
-  for (const e of (race.events || []).filter((x) => x.kind === "out" && x.lap < TOTAL)) {
-    const order = orderAt(race, ghost.bounds[e.lap - 1][0], HAM, { code: "YOU", p: e.lap - 1 });
+  for (const e of (race.events || []).filter((x) => x.kind === "out" && x.t + 3 < ghost.finish)) {
+    const order = orderAt(race, e.t, HAM, { code: "YOU", p: progressAt(ghost.bounds, e.t) });
     const me = order.findIndex((o) => o.code === "YOU");
     const them = order.findIndex((o) => o.code === race.drivers.find((d) => d.num === e.driver)?.code);
     if (them >= 0 && (!nearest || Math.abs(me - them) < nearest.dist)) nearest = { e, dist: Math.abs(me - them) };
   }
-  if (nearest) say(nearest.e.lap, "car_out", { car: names[String(nearest.e.driver)] }, 4);
+  if (nearest) say(nearest.e.t + 3, nearest.e.lap, "car_out", { car: names[String(nearest.e.driver)] }, 4);
 
   // The finish.
-  say(TOTAL, "last_lap", {}, 2);
+  say(ghost.bounds[TOTAL - 1][0] + 2, TOTAL, "last_lap", {}, 2);
   const pos = summary.result.your_position;
   const flag = typeof pos !== "number" ? "flag_dsq" : copy ? "flag_copy" : pos <= 3 ? "flag_podium"
     : pos < realPos ? "flag_better" : pos === realPos ? "flag_same" : "flag_worse";
-  say(TOTAL + 1, flag, { pos, realPos }, 0);
+  say(ghost.finish + 2, TOTAL + 1, flag, { pos, realPos }, 0);
 
   const kept = [...msgs].sort((a, b) => a.priority - b.priority || a.order - b.order).slice(0, MAX_RADIO);
-  return kept.sort((a, b) => a.lap - b.lap || a.order - b.order).map(({ lap, from, text, key }) => ({ lap, from, text, key }));
+  return kept.sort((a, b) => a.t - b.t || a.order - b.order).map(({ t, lap, from, text, key }) => ({ t, lap, from, text, key }));
+}
+
+// Opus tags its radio by lap. Each line takes the time of a built-in line on the same lap (those sit
+// just after what happened), in order; any others play 40% into the lap, or after a VSC that comes
+// out during it.
+export function timeLapRadio(race, ghost, builtIn, lines) {
+  const vscs = vscPeriods(race);
+  const used = {};
+  return lines.map((m) => {
+    const same = builtIn.filter((b) => b.lap === m.lap);
+    const i = (used[m.lap] = (used[m.lap] ?? -1) + 1);
+    let t = same[i]?.t;
+    if (t === undefined) {
+      t = ghostLapTime(ghost, m.lap, 0.4);
+      const v = vscs.find(([a]) => a >= ghostLapTime(ghost, m.lap, 0) && a < ghostLapTime(ghost, m.lap, 1));
+      if (v) t = Math.max(t, v[0] + 5);
+    }
+    return { ...m, t };
+  }).sort((a, b) => a.t - b.t);
 }
 
 export function builtInDebrief(race, ghost, summary, bank, stints, odds) {
