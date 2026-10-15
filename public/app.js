@@ -1,5 +1,5 @@
 import {
-  HAM, simulateGhost, realStrategy, validateStrategy, progressAt, classify, tyreAt, tyreModelLap, fittedAge, planStint,
+  HAM, simulateGhost, realStrategy, validateStrategy, progressAt, classify, tyreAt, tyreModelLap, usedSets, fitSets,
   realProgress, ghostProgress, timeAtGhostLaps, raceOdds, pitLoss, inWindow, stackedBehind,
 } from "./sim.js";
 import { buildSummary, builtInRadio, builtInDebrief, timeLapRadio, stintSpans as spans } from "./engineer.js";
@@ -35,11 +35,13 @@ const state = {
 };
 const MAX_STINTS = 4;
 const ODDS_RUNS = 200;
-// What each compound comes as: the sets Ferrari fitted in this race.
+// What each compound comes as: the used sets Ferrari had in this race, then new ones.
 const SET_NOTE = ["SOFT", "MEDIUM"].map((c) => {
-  const age = fittedAge(race, c), name = c === "SOFT" ? "soft" : "medium";
-  return age > 0 ? `Every ${name} is a used set with ${age} laps on it, like every ${name} Ferrari fitted in this race.`
-    : `Every ${name} is a new set.`;
+  const { age, count } = usedSets(race, c), name = c === "SOFT" ? "soft" : "medium";
+  if (!count) return `Every ${name} is a new set.`;
+  const first = count === 1 ? `Your first ${name} is a used set with ${age} laps on it`
+    : `Your first ${["two", "three"][count - 2] ?? count} ${name}s are used sets with ${age} laps on them`;
+  return `${first}, as Ferrari's were; any more are new.`;
 }).join(" ");
 
 const timeline = (num) => race.timelines[String(num)] || [];
@@ -449,7 +451,10 @@ function tyreHud(who, stints, progress) {
   const w = $(`tyre-${who}-w`);
   w.style.width = `${Math.max(4, 100 - (loss / 4) * 100)}%`;
   w.classList.toggle("cliff", ty.age > race.model.cliff_at[ty.compound]);
-  $(`tyre-${who}-a`).innerHTML = `${ty.age} laps${stints[ty.stint].ageAtStart > 0 ? ` <span class="used">used set</span>` : ""}`;
+  // A used set is marked as it goes on: through the out-lap and the lap after.
+  const set = stints[ty.stint];
+  const used = set.ageAtStart > 0 && lap < set.from + 2;
+  $(`tyre-${who}-a`).innerHTML = `${ty.age} laps${used ? ` <span class="used">used set</span>` : ""}`;
 }
 
 function updateHud() {
@@ -653,7 +658,6 @@ function movePit(i, from) {
   const min = st[i - 1].from + 2;
   const max = i + 1 < st.length ? st[i + 1].from - 2 : TOTAL;
   st[i].from = Math.max(min, Math.min(max, from));
-  st[i].ageAtStart = fittedAge(race, st[i].compound);
   state.note = "";
   renderRuler();
 }
@@ -669,7 +673,8 @@ function addStopAt(lap) {
   if (k < 0 || from < s.from + 2 || from > max) {
     state.note = "Stops need at least two laps between them.";
   } else {
-    st.splice(k + 1, 0, planStint(race, s.compound === "SOFT" ? "MEDIUM" : "SOFT", from));
+    st.splice(k + 1, 0, { compound: s.compound === "SOFT" ? "MEDIUM" : "SOFT", from });
+    state.stints = fitSets(race, st);
     state.note = "";
   }
   renderRuler();
@@ -677,6 +682,7 @@ function addStopAt(lap) {
 
 function removeStop(i) {
   state.stints.splice(i, 1);
+  state.stints = fitSets(race, state.stints);
   state.note = "";
   renderRuler();
 }
@@ -789,7 +795,7 @@ $("stops").addEventListener("click", (e) => {
   if (b.dataset.act === "remove") { removeStop(i); return $("add-stop").focus(); }
   if (b.dataset.act === "tyre") {
     st[i].compound = b.dataset.c;
-    st[i].ageAtStart = fittedAge(race, st[i].compound);
+    state.stints = fitSets(race, st);
     renderRuler();
   }
 });
@@ -987,9 +993,9 @@ window.desk = { race, state, startRace };
 
 // Screenshot hook: ?at=<race seconds>[&vsc=1 | &stints=M1,S31][&finish=1] starts a race and freezes it at that moment.
 const qs = new URLSearchParams(location.search);
-if (qs.has("vsc")) state.stints = [...REAL_STINTS.map((s) => ({ ...s })), planStint(race, "SOFT", 40)];
+if (qs.has("vsc")) state.stints = fitSets(race, [...REAL_STINTS, { compound: "SOFT", from: 40 }]);
 if (qs.has("stints")) {
-  state.stints = qs.get("stints").split(",").map((s) => planStint(race, s[0] === "S" ? "SOFT" : "MEDIUM", +s.slice(1)));
+  state.stints = fitSets(race, qs.get("stints").split(",").map((s) => ({ compound: s[0] === "S" ? "SOFT" : "MEDIUM", from: +s.slice(1) })));
 }
 renderRuler();
 if (qs.has("at")) {

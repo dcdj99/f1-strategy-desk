@@ -35,8 +35,8 @@ Stop the server with Ctrl+C.
    - Drag a stop along the bar to move it, or use the arrows next to it in the pit sheet. With a stop
      selected, the arrow keys move it and Delete removes it; the × in the pit sheet removes it too.
    - Choose the tyre each stop fits. You must use both compounds or the ghost is disqualified.
-     Each is the kind of set Ferrari fitted: every soft has 3 laps on it, every medium is new. The tyre
-     readout marks a used set.
+     Your first two softs are used sets with 3 laps on them, as Ferrari's were; a third is new, and so
+     is every medium. The tyre readout marks a used set as it goes on.
    - The marks under the bar show when the VSCs, retirements and Hamilton's Turn 1 moment happened, each
      where the playhead will be at that moment (on Hamilton's laps while you plan, yours once you race).
      The hatched bands run from when each VSC came out to when it ended. The pit sheet shows what each
@@ -108,9 +108,9 @@ elsewhere. Run the tests with `npm test`.
   drives Hamilton's real 33s run down the pit lane, standstill included, lined up on the timing line.
 - Tyre sets are the ones Ferrari had. Every soft either car fitted in the race (Leclerc's start, both
   cars' soft stops) had 3 laps on it, as the last two qualifying runs (out lap, push lap, in lap) left
-  them, and every medium was new. So a soft you plan starts 3 laps old, at the start or at any stop,
-  and a medium starts new. Leclerc raced both of his 3-lap softs; Hamilton raced one of his two, so
-  the other was there for a second stop.
+  them, and every medium was new. Leclerc raced both of his 3-lap softs; Hamilton raced one of his two,
+  so the other was there for a second stop. So the first two softs you plan start 3 laps old, at the
+  start or at any stop, a third starts new, and so does every medium.
 - Ferrari double-stacks. Both cars use the same box, about 5.5s past the timing line. If the ghost gets
   there while Leclerc is in it, it waits a second short of the box until he has moved off, stops in the
   box 3s after he does, then gets its normal stop. The wait goes on the out-lap, the map shows "You
@@ -176,9 +176,8 @@ elsewhere. Run the tests with `npm test`.
   stops when he really did, even if the ghost hasn't left yet.
   The pit cost in the strategy comes from all the real stops, so a slow or quick stop doesn't change it.
 - Hard tyres weren't raced, so only softs and mediums are offered.
-- Every soft is a 3-lap set however many you plan, but Hamilton had only two such sets; a third would
-  have had 6 or more laps on it. OpenF1 doesn't show which sets went back to Pirelli, so even the
-  second is inferred from qualifying.
+- A third soft is taken to be new, though nothing shows Hamilton had a new soft left. OpenF1 doesn't
+  show which sets went back to Pirelli, so even his second 3-lap set is inferred from qualifying.
 - Opus tags its radio by lap, not by moment. Each Opus line takes the time of the built-in line on the
   same lap, so it usually lands just after the event, but a line about something the built-in radio
   didn't mention plays 40% into its lap.

@@ -21,18 +21,28 @@ export function realStrategy(race) {
   }));
 }
 
-// How many laps a set already had when Ferrari fitted it in this race, by compound. Every soft either
-// car ran (Leclerc's start, both cars' stops) was a set with 3 laps on it from qualifying; every
-// medium was new. A stint you plan gets the same, at the start or at any stop.
-export function fittedAge(race, compound) {
+// The used sets Ferrari had for this race, by compound: the laps one had on it when fitted, and how
+// many a car had. Every soft either car fitted (Leclerc's start, both cars' stops) had 3 laps on it,
+// from their last two qualifying runs; Leclerc raced both of his, and Hamilton had two as well.
+// Every medium was new.
+export function usedSets(race, compound) {
   const team = race.drivers.find((d) => d.num === HAM)?.team;
-  const ages = race.drivers.filter((d) => d.team === team)
-    .flatMap((d) => race.stints[String(d.num)] || [])
-    .filter((s) => s.compound === compound).map((s) => s.age_at_start || 0);
-  return ages.length ? Math.min(...ages) : 0;
+  const cars = race.drivers.filter((d) => d.team === team)
+    .map((d) => (race.stints[String(d.num)] || []).filter((s) => s.compound === compound && s.age_at_start > 0));
+  const ages = cars.flat().map((s) => s.age_at_start);
+  return { age: ages.length ? Math.min(...ages) : 0, count: Math.max(0, ...cars.map((c) => c.length)) };
 }
 
-export const planStint = (race, compound, from) => ({ compound, from, ageAtStart: fittedAge(race, compound) });
+// A plan's tyres as they go on, at the start or at any stop: the used sets of each compound first,
+// then new ones. So the first two softs have 3 laps on them, and a third is new.
+export function fitSets(race, stints) {
+  const fitted = {};
+  return stints.map((s) => {
+    const { age, count } = usedSets(race, s.compound);
+    fitted[s.compound] = (fitted[s.compound] || 0) + 1;
+    return { ...s, ageAtStart: fitted[s.compound] <= count ? age : 0 };
+  });
+}
 
 export function validateStrategy(race, stints) {
   const total = race.race.total_laps;

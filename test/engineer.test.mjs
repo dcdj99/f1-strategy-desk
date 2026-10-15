@@ -1,14 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { simulateGhost, realStrategy, raceOdds, planStint } from "../public/sim.js";
+import { simulateGhost, realStrategy, raceOdds, fitSets } from "../public/sim.js";
 import { buildSummary, builtInRadio, builtInDebrief } from "../public/engineer.js";
 
 const race = JSON.parse(readFileSync(new URL("../public/data/race.json", import.meta.url), "utf8"));
 const bank = JSON.parse(readFileSync(new URL("../public/data/engineer.json", import.meta.url), "utf8"));
 const TOTAL = race.race.total_laps;
 const M = "MEDIUM", S = "SOFT";
-const stint = (compound, from) => planStint(race, compound, from);
+const stint = (compound, from) => ({ compound, from });
 
 // A spread of plans: Ferrari's, one-stops all race long, two-stops, three stops, and an illegal one.
 const PLANS = [realStrategy(race)];
@@ -20,6 +20,8 @@ PLANS.push([stint(S, 1), stint(M, 13), stint(S, 29), stint(S, 46)]);
 PLANS.push([stint(S, 1), stint(S, 30)]);
 // Boxing on lap 24 just behind Leclerc: a double stack.
 PLANS.push([stint(S, 1), stint(M, 25)]);
+// Each on the sets Ferrari had, in the order they go on.
+for (const [i, st] of PLANS.entries()) PLANS[i] = fitSets(race, st);
 
 const races = PLANS.map((st) => {
   const ghost = simulateGhost(race, st);

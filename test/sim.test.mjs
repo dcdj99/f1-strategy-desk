@@ -3,14 +3,15 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   simulateGhost, realStrategy, classify, validateStrategy, realProgress, ghostProgress, timeAtGhostLaps, HAM, TRAFFIC,
-  passingModel, luck, raceOdds, fittedAge, planStint,
+  passingModel, luck, raceOdds, usedSets, fitSets,
 } from "../public/sim.js";
 
 const race = JSON.parse(readFileSync(new URL("../public/data/race.json", import.meta.url), "utf8"));
 const realBounds = race.timelines[String(HAM)];
 const realLaps = race.laps[String(HAM)];
 const realTotal = realBounds.at(-1)[1] - realBounds[0][0];
-const vscTwoStop = () => [...realStrategy(race), planStint(race, "SOFT", 40)];
+const plan = (spec) => fitSets(race, spec.split(",").map((s) => ({ compound: s[0] === "S" ? "SOFT" : "MEDIUM", from: +s.slice(1) })));
+const vscTwoStop = () => fitSets(race, [...realStrategy(race), { compound: "SOFT", from: 40 }]);
 const SEEDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 test("control: Ferrari's real strategy reproduces every one of Hamilton's real laps", () => {
@@ -92,11 +93,11 @@ test("scrubbing: time at a lap count round-trips through ghost timing", () => {
 });
 
 const DIVERGING = {
-  "early stop": [planStint(race, "MEDIUM", 1), planStint(race, "SOFT", 11)],
-  "long first stint": [planStint(race, "MEDIUM", 1), planStint(race, "SOFT", 31)],
-  "soft start": [planStint(race, "SOFT", 1), planStint(race, "MEDIUM", 26)],
+  "early stop": plan("M1,S11"),
+  "long first stint": plan("M1,S31"),
+  "soft start": plan("S1,M26"),
   "VSC two-stop": vscTwoStop(),
-  "three stops": [planStint(race, "SOFT", 1), planStint(race, "MEDIUM", 13), planStint(race, "SOFT", 29), planStint(race, "SOFT", 46)],
+  "three stops": plan("S1,M13,S29,S46"),
 };
 const P = passingModel(race);
 const inPits = (num, lap) => (race.pits[String(num)] || []).some((p) => p === lap || p === lap - 1);
@@ -203,14 +204,16 @@ test("traffic: the ghost only copies Hamilton's lap while it is where he was", (
   }
 });
 
-test("a planned stint gets the set Ferrari fitted for its compound", () => {
+test("a plan gets Ferrari's used sets of each compound first, then new ones", () => {
+  // Both cars' real races come back on the sets they really had.
   const team = race.drivers.find((d) => d.num === HAM).team;
   for (const d of race.drivers.filter((x) => x.team === team)) {
-    for (const s of race.stints[String(d.num)]) {
-      assert.equal(fittedAge(race, s.compound), s.age_at_start, `${d.code} ${s.compound} from lap ${s.lap_start}`);
-    }
+    const real = race.stints[String(d.num)].map((s) => ({ compound: s.compound, from: s.lap_start, ageAtStart: s.age_at_start }));
+    assert.deepEqual(fitSets(race, real.map(({ compound, from }) => ({ compound, from }))), real, d.code);
   }
-  assert.deepEqual(realStrategy(race).map((s) => planStint(race, s.compound, s.from)), realStrategy(race));
+  // Two used softs, as each car had; the third soft is new, and so is every medium.
+  const soft = usedSets(race, "SOFT");
+  assert.deepEqual(plan("S1,M13,S29,S46").map((s) => s.ageAtStart), [soft.age, 0, soft.age, 0]);
 });
 
 test("one-compound race is flagged for disqualification", () => {
