@@ -1,12 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { simulateGhost, realProgress, ghostProgress, boxStops, boxStill, BOX_CLEAR, HAM } from "../public/sim.js";
+import { simulateGhost, realProgress, ghostProgress, boxStops, boxStill, planStint, BOX_CLEAR, HAM } from "../public/sim.js";
 
 const race = JSON.parse(readFileSync(new URL("../public/data/race.json", import.meta.url), "utf8"));
 const LAP_M = 4940; // Marina Bay lap length, metres
 const STEP = 0.05;
-const plan = (spec) => spec.split(",").map((s) => ({ compound: s[0] === "S" ? "SOFT" : "MEDIUM", from: +s.slice(1), ageAtStart: 0 }));
+const plan = (spec) => spec.split(",").map((s) => planStint(race, s[0] === "S" ? "SOFT" : "MEDIUM", +s.slice(1)));
 const PLANS = {
   "Ferrari's call": "M1,S19",
   "box lap 2": "S1,M3",

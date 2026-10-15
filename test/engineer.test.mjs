@@ -1,14 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { simulateGhost, realStrategy, raceOdds } from "../public/sim.js";
+import { simulateGhost, realStrategy, raceOdds, planStint } from "../public/sim.js";
 import { buildSummary, builtInRadio, builtInDebrief } from "../public/engineer.js";
 
 const race = JSON.parse(readFileSync(new URL("../public/data/race.json", import.meta.url), "utf8"));
 const bank = JSON.parse(readFileSync(new URL("../public/data/engineer.json", import.meta.url), "utf8"));
 const TOTAL = race.race.total_laps;
 const M = "MEDIUM", S = "SOFT";
-const stint = (compound, from) => ({ compound, from, ageAtStart: 0 });
+const stint = (compound, from) => planStint(race, compound, from);
 
 // A spread of plans: Ferrari's, one-stops all race long, two-stops, three stops, and an illegal one.
 const PLANS = [realStrategy(race)];

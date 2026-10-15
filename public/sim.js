@@ -21,6 +21,19 @@ export function realStrategy(race) {
   }));
 }
 
+// How many laps a set already had when Ferrari fitted it in this race, by compound. Every soft either
+// car ran (Leclerc's start, both cars' stops) was a set with 3 laps on it from qualifying; every
+// medium was new. A stint you plan gets the same, at the start or at any stop.
+export function fittedAge(race, compound) {
+  const team = race.drivers.find((d) => d.num === HAM)?.team;
+  const ages = race.drivers.filter((d) => d.team === team)
+    .flatMap((d) => race.stints[String(d.num)] || [])
+    .filter((s) => s.compound === compound).map((s) => s.age_at_start || 0);
+  return ages.length ? Math.min(...ages) : 0;
+}
+
+export const planStint = (race, compound, from) => ({ compound, from, ageAtStart: fittedAge(race, compound) });
+
 export function validateStrategy(race, stints) {
   const total = race.race.total_laps;
   const problems = [];

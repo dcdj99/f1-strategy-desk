@@ -3,14 +3,14 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   simulateGhost, realStrategy, classify, validateStrategy, realProgress, ghostProgress, timeAtGhostLaps, HAM, TRAFFIC,
-  passingModel, luck, raceOdds,
+  passingModel, luck, raceOdds, fittedAge, planStint,
 } from "../public/sim.js";
 
 const race = JSON.parse(readFileSync(new URL("../public/data/race.json", import.meta.url), "utf8"));
 const realBounds = race.timelines[String(HAM)];
 const realLaps = race.laps[String(HAM)];
 const realTotal = realBounds.at(-1)[1] - realBounds[0][0];
-const vscTwoStop = () => [...realStrategy(race), { compound: "SOFT", from: 40, ageAtStart: 0 }];
+const vscTwoStop = () => [...realStrategy(race), planStint(race, "SOFT", 40)];
 const SEEDS = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 
 test("control: Ferrari's real strategy reproduces every one of Hamilton's real laps", () => {
@@ -68,10 +68,17 @@ test("pitting under the lap-39 VSC for fresh softs beats staying out", () => {
 });
 
 test("the same extra stop under green flags costs more than under the VSC", () => {
-  // Averaged over passing luck: one unlucky race behind a car can hide the cheaper stop.
-  const mean = (st) => SEEDS.reduce((sum, seed) => sum + simulateGhost(race, st, { seed }).total, 0) / SEEDS.length;
-  const green = mean([...realStrategy(race), { compound: "SOFT", from: 44, ageAtStart: 0 }]);
-  const vsc = mean(vscTwoStop());
+  // The lap-40 stop again, priced as a green-flag stop, timed without the laps lost behind cars and
+  // averaged over passing luck. On the used softs Ferrari had, the cheaper stop often comes out
+  // behind a car it can't pass, which can eat what it saved; stopping later is no fair contrast
+  // either, since by lap 40 the old set is past its cliff.
+  const greenPriced = { ...race, model: { ...race.model, pit_loss_vsc: race.model.pit_loss_green } };
+  const clean = (r) => SEEDS.reduce((sum, seed) => {
+    const g = simulateGhost(r, vscTwoStop(), { seed });
+    return sum + g.total - g.traffic.reduce((s, t) => s + t.lost, 0);
+  }, 0) / SEEDS.length;
+  const green = clean(greenPriced);
+  const vsc = clean(race);
   assert.ok(vsc < green, `VSC ${vsc} vs green ${green}`);
 });
 
@@ -85,12 +92,11 @@ test("scrubbing: time at a lap count round-trips through ghost timing", () => {
 });
 
 const DIVERGING = {
-  "early stop": [{ compound: "MEDIUM", from: 1, ageAtStart: 0 }, { compound: "SOFT", from: 11, ageAtStart: 0 }],
-  "long first stint": [{ compound: "MEDIUM", from: 1, ageAtStart: 0 }, { compound: "SOFT", from: 31, ageAtStart: 0 }],
-  "soft start": [{ compound: "SOFT", from: 1, ageAtStart: 0 }, { compound: "MEDIUM", from: 26, ageAtStart: 0 }],
+  "early stop": [planStint(race, "MEDIUM", 1), planStint(race, "SOFT", 11)],
+  "long first stint": [planStint(race, "MEDIUM", 1), planStint(race, "SOFT", 31)],
+  "soft start": [planStint(race, "SOFT", 1), planStint(race, "MEDIUM", 26)],
   "VSC two-stop": vscTwoStop(),
-  "three stops": [{ compound: "SOFT", from: 1, ageAtStart: 0 }, { compound: "MEDIUM", from: 13, ageAtStart: 0 },
-    { compound: "SOFT", from: 29, ageAtStart: 0 }, { compound: "SOFT", from: 46, ageAtStart: 0 }],
+  "three stops": [planStint(race, "SOFT", 1), planStint(race, "MEDIUM", 13), planStint(race, "SOFT", 29), planStint(race, "SOFT", 46)],
 };
 const P = passingModel(race);
 const inPits = (num, lap) => (race.pits[String(num)] || []).some((p) => p === lap || p === lap - 1);
@@ -195,6 +201,16 @@ test("traffic: the ghost only copies Hamilton's lap while it is where he was", (
       assert.equal(info.mode, offset < TRAFFIC.sameSpot ? "lewis" : "own", `${name} lap ${i + 1}`);
     });
   }
+});
+
+test("a planned stint gets the set Ferrari fitted for its compound", () => {
+  const team = race.drivers.find((d) => d.num === HAM).team;
+  for (const d of race.drivers.filter((x) => x.team === team)) {
+    for (const s of race.stints[String(d.num)]) {
+      assert.equal(fittedAge(race, s.compound), s.age_at_start, `${d.code} ${s.compound} from lap ${s.lap_start}`);
+    }
+  }
+  assert.deepEqual(realStrategy(race).map((s) => planStint(race, s.compound, s.from)), realStrategy(race));
 });
 
 test("one-compound race is flagged for disqualification", () => {

@@ -99,7 +99,7 @@ button, select { font: inherit; color: inherit; }
   position: absolute; right: 1.5rem; top: 14rem; width: var(--wall); z-index: 2;
   display: grid; gap: 0.35rem; font-family: var(--display); font-size: 1.15rem;
 }
-.tyre-row { display: grid; grid-template-columns: 4.5rem 1.6rem 8rem 3.5rem; align-items: center; gap: 0.5rem; }
+.tyre-row { display: grid; grid-template-columns: 4.5rem 1.6rem minmax(0, 1fr) 7.5rem; align-items: center; gap: 0.5rem; }
 .tyre-row .who { color: var(--flood-dim); }
 .tyre-row[data-who="you"] .who { color: var(--ghost); }
 .tyre-row[data-who="real"] .who { color: #ff7a85; }
@@ -112,7 +112,8 @@ button, select { font: inherit; color: inherit; }
 .wear { height: 0.5rem; border-radius: 4px; background: var(--bay-line); overflow: hidden; }
 .wear-fill { display: block; height: 100%; width: 100%; background: var(--flood); transition: width 0.3s, background 0.3s; }
 .wear-fill.cliff { background: var(--rosso); }
-.age { color: var(--flood-dim); font-variant-numeric: tabular-nums; }
+.age { color: var(--flood-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.age .used { font-size: 0.85em; color: var(--sodium); }
 
 /* Race control, then the team radio filling the rest of the column down to the bottom of the map. */
 .feed {
@@ -270,6 +271,7 @@ button, select { font: inherit; color: inherit; }
 .chip.soft[aria-checked="true"] { background: var(--soft); color: #fff; }
 .chip.medium[aria-checked="true"] { background: var(--medium); color: var(--bay-deep); }
 .stop-note { color: var(--flood-dim); font-size: 0.95rem; white-space: nowrap; }
+.sheet-note { margin: 0; max-width: 34rem; color: var(--flood-dim); font-size: 0.9rem; }
 .stop.cheap .stop-note { color: var(--sodium); }
 .sheet-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 .sheet-actions .primary { margin-left: auto; }
@@ -380,7 +382,7 @@ button, select { font: inherit; color: inherit; }
   .delta-value { font-size: 3.25rem; }
   .delta-label { font-size: 1.15rem; }
   .tyres { order: 4; flex: 1 1 100%; font-size: 1.1rem; }
-  .tyre-row { grid-template-columns: 4.75rem 1.6rem minmax(0, 1fr) 3.75rem; }
+  .tyre-row { grid-template-columns: 4.75rem 1.6rem minmax(0, 1fr) 7.5rem; }
 
   /* The map runs edge to edge; its height doesn't follow the phone's toolbar. */
   .viewport {

@@ -1,14 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { simulateGhost, realStrategy, realProgress, ghostProgress, pitLoss, progressAt, inWindow, stackedBehind, HAM } from "../public/sim.js";
+import { simulateGhost, realStrategy, realProgress, ghostProgress, pitLoss, progressAt, inWindow, stackedBehind, planStint, HAM } from "../public/sim.js";
 import { buildSummary, builtInRadio } from "../public/engineer.js";
 import { vscPeriods, outAt, raceMoments, timelineMarks } from "../public/moments.js";
 
 const race = JSON.parse(readFileSync(new URL("../public/data/race.json", import.meta.url), "utf8"));
 const bank = JSON.parse(readFileSync(new URL("../public/data/engineer.json", import.meta.url), "utf8"));
 const TOTAL = race.race.total_laps;
-const plan = (spec) => spec.split(",").map((s) => ({ compound: s[0] === "S" ? "SOFT" : "MEDIUM", from: +s.slice(1), ageAtStart: 0 }));
+const plan = (spec) => spec.split(",").map((s) => planStint(race, s[0] === "S" ? "SOFT" : "MEDIUM", +s.slice(1)));
 const PLANS = {
   "Ferrari's call": realStrategy(race),
   "box lap 2": plan("S1,M3"),
@@ -17,7 +17,7 @@ const PLANS = {
   "box lap 9, just after the VSC": plan("M1,S10"),
   "box lap 30": plan("M1,S31"),
   "box lap 38, just before the VSC": plan("M1,S39"),
-  "VSC two-stop": [...realStrategy(race), { compound: "SOFT", from: 40, ageAtStart: 0 }],
+  "VSC two-stop": [...realStrategy(race), planStint(race, "SOFT", 40)],
   "box lap 60": plan("M1,S61"),
   "box lap 24, stacked behind Leclerc": plan("S1,M25"),
 };
